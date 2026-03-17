@@ -1,0 +1,7 @@
+.edit
+
+*__pycache__
+
+local/
+
+logs/
