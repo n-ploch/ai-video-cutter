@@ -28,13 +28,6 @@ from scipy.signal import find_peaks
 import ruptures as rpt
 from tqdm import tqdm
 
-try:
-    from scenedetect import open_video, SceneManager
-    from scenedetect.detectors import AdaptiveDetector
-    _PYSCENEDETECT_AVAILABLE = True
-except ImportError:
-    _PYSCENEDETECT_AVAILABLE = False
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -381,46 +374,6 @@ class SceneSegmenter:
         return boundaries
 
 
-def detect_scenes_pyscenedetect(
-    video_path: str,
-    threshold: float = 27.0,
-    min_scene_len: int = 15,
-    frame_skip: int = 0,
-) -> list[dict]:
-    """
-    Detect scene boundaries using PySceneDetect's ContentDetector.
-
-    Memory footprint: O(1) — frames are read and discarded one at a time via the
-    VideoStream API; only running HSV histogram accumulators are kept in memory.
-    Throughput: controlled via `frame_skip` (skip N frames between samples) and
-    the ContentDetector which does only cheap HSV difference computation per frame.
-
-    Returns a list of {"start": float, "end": float} dicts (seconds).
-    """
-    if not _PYSCENEDETECT_AVAILABLE:
-        log.warning("pyscenedetect not installed — skipping PySceneDetect pass")
-        return []
-
-    video = open_video(video_path)
-    scene_manager = SceneManager()
-    scene_manager.add_detector(
-        AdaptiveDetector()
-    )
-    # detect_scenes streams one frame at a time; frame_skip=0 examines every frame
-    scene_manager.detect_scenes(video, show_progress=False, frame_skip=frame_skip)
-    scene_list = scene_manager.get_scene_list()
-
-    result = [
-        {"start": round(s[0].get_seconds(), 3), "end": round(s[1].get_seconds(), 3)}
-        for s in scene_list
-    ]
-    log.info(
-        f"PySceneDetect found {len(result)} scenes "
-        f"(threshold={threshold}, min_scene_len={min_scene_len})"
-    )
-    return result
-
-
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
@@ -510,11 +463,7 @@ class DronePipeline:
         # --- 4. Build scene objects ---
         scenes = self._build_scenes(all_boundaries, quality_metrics, flow_stats, embeddings, timestamps)
 
-        # --- 5. PySceneDetect pass (pixel-level, independent of embeddings) ---
-        log.info("=== PySceneDetect pass ===")
-        pydetect_scenes = detect_scenes_pyscenedetect(video_path)
-
-        # --- 6. Assemble output ---
+        # --- 5. Assemble output ---
         result = {
             "video_path": str(video_path),
             "duration": float(timestamps[-1]),
@@ -523,7 +472,6 @@ class DronePipeline:
             "frame_metrics": [asdict(m) for m in quality_metrics],
             "flow_stats": [asdict(f) for f in flow_stats],
             "boundaries": all_boundaries,
-            "from_pydetect": pydetect_scenes,
         }
 
         # Optionally save
@@ -697,21 +645,6 @@ def _print_summary(result: dict) -> None:
         )
 
 
-def _print_pydetect_summary(result: dict) -> None:
-    scenes = result.get("from_pydetect", [])
-    print(f"\n{'=' * 60}")
-    print(f"Video: {result['video_path']}")
-    print(f"Duration: {result.get('duration', 0.0):.1f}s")
-    print(f"PySceneDetect scenes: {len(scenes)}")
-    print(f"{'=' * 60}")
-    for i, s in enumerate(scenes):
-        print(
-            f"  Scene {i:2d} | "
-            f"{s['start']:6.1f}s - {s['end']:6.1f}s | "
-            f"duration: {s['end'] - s['start']:5.1f}s"
-        )
-
-
 def _analysis_path(video_path: Path) -> Path:
     """Return the .analysis.json path for a video, stripping the video extension first."""
     return video_path.parent / (video_path.stem + ".analysis.json")
@@ -725,18 +658,6 @@ def _embeddings_path(video_path: Path) -> Path:
 def _is_already_analyzed(video_path: Path) -> bool:
     """Return True if both output files for this video already exist."""
     return _analysis_path(video_path).exists() and _embeddings_path(video_path).exists()
-
-
-def _has_pydetect(video_path: Path) -> bool:
-    """Return True if the analysis JSON already contains from_pydetect results."""
-    json_path = _analysis_path(video_path)
-    if not json_path.exists():
-        return False
-    try:
-        with open(json_path) as f:
-            return bool(json.load(f).get("from_pydetect"))
-    except Exception:
-        return False
 
 
 def _load_existing_analysis(video_path: Path) -> Optional[dict]:
@@ -779,24 +700,14 @@ if __name__ == "__main__":
     parser.add_argument("--flow-width", type=int, default=640, help="Frame width for optical flow pass")
     parser.add_argument("--batch-size", type=int, default=16, help="Embedding batch size")
     parser.add_argument("--reanalyze", action="store_true", help="Re-run even if output files already exist")
-    # Partial-pipeline flags
-    parser.add_argument(
-        "--pyscene-only",
-        action="store_true",
-        help="Skip embedding/flow passes; run only PySceneDetect and write from_pydetect",
-    )
     parser.add_argument(
         "--use-existing",
         action="store_true",
         help=(
             "Load existing .analysis.json files next to each video and apply only the "
-            "selected pipeline steps (e.g. --pyscene-only). Skips videos with no JSON."
+            "selected pipeline steps. Skips videos with no existing JSON."
         ),
     )
-    parser.add_argument("--pyscene-threshold", type=float, default=27.0,
-                        help="ContentDetector threshold for PySceneDetect (default: 27.0)")
-    parser.add_argument("--pyscene-min-scene", type=int, default=15,
-                        help="Minimum scene length in frames for PySceneDetect (default: 15)")
     args = parser.parse_args()
 
     videos = _collect_videos(args.video)
@@ -809,64 +720,8 @@ if __name__ == "__main__":
     if batch_mode and args.output:
         log.warning("--output is ignored in directory mode; outputs are written next to each video.")
 
-    # ── Pyscene-only branch ────────────────────────────────────────────────
-    if args.pyscene_only:
-        if args.use_existing:
-            # Only process videos that already have an analysis JSON
-            pending = [v for v in videos if _analysis_path(v).exists()]
-            missing = len(videos) - len(pending)
-            if missing:
-                log.warning(f"{missing} video(s) have no existing JSON and will be skipped.")
-        else:
-            # Process all videos; respect --reanalyze for whether from_pydetect already exists
-            pending = [v for v in videos if args.reanalyze or not _has_pydetect(v)]
-
-        skipped = len(videos) - len(pending)
-        if batch_mode:
-            log.info(
-                f"Found {len(videos)} video(s) — {skipped} skipped, "
-                f"{len(pending)} to process (pyscene-only)."
-            )
-
-        if not pending:
-            log.info("Nothing to do.")
-            raise SystemExit(0)
-
-        for i, video_path in enumerate(pending, 1):
-            if batch_mode:
-                log.info(f"[{i}/{len(pending)}] PySceneDetect: {video_path.name}")
-
-            if args.use_existing:
-                result = _load_existing_analysis(video_path)
-            else:
-                # Build a minimal result skeleton from video metadata
-                try:
-                    probe = ffmpeg.probe(str(video_path))
-                    duration = float(probe["format"]["duration"])
-                except ffmpeg.Error as e:
-                    log.error(f"Could not probe {video_path.name}: {e.stderr.decode(errors='replace')}")
-                    continue
-                result = {"video_path": str(video_path), "duration": duration}
-
-            result["from_pydetect"] = detect_scenes_pyscenedetect(
-                str(video_path),
-                threshold=args.pyscene_threshold,
-                min_scene_len=args.pyscene_min_scene,
-            )
-
-            out_path = _analysis_path(video_path) if batch_mode else (
-                Path(args.output) if args.output else _analysis_path(video_path)
-            )
-            with open(out_path, "w") as f:
-                json.dump(result, f, indent=2)
-            log.info(f"Saved → {out_path}")
-            _print_pydetect_summary(result)
-
-        raise SystemExit(0)
-
-    # ── Full pipeline branch ───────────────────────────────────────────────
     if args.use_existing:
-        log.warning("--use-existing has no effect without a step flag (e.g. --pyscene-only); running full pipeline.")
+        log.warning("--use-existing has no effect without a step flag; running full pipeline.")
 
     # Filter out already-analyzed videos unless --reanalyze is set
     pending = [v for v in videos if args.reanalyze or not _is_already_analyzed(v)]
