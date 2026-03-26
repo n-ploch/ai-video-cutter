@@ -28,6 +28,8 @@ from scipy.signal import find_peaks
 import ruptures as rpt
 from tqdm import tqdm
 
+from sklearn.preprocessing import StandardScaler
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -51,6 +53,19 @@ class FlowStats:
     mean_magnitude: float
     dominant_direction: float  # radians
     coherence: float  # 0-1, how uniform the flow field is
+
+@dataclass
+class FlowDecomposition:
+    timestamp: float
+    # Camera ego-motion (homography decomposition, values normalised by frame dims)
+    pan: float               # horizontal translation / frame_width  (-1..1)
+    tilt: float              # vertical translation / frame_height   (-1..1)
+    roll: float              # rotation in degrees
+    zoom: float              # scale - 1: 0=static, >0=zoom-in, <0=zoom-out
+    camera_magnitude: float  # mean px/frame of camera-only flow
+    # Independent object motion (RANSAC residual)
+    scene_activity: float        # mean px/frame of residual flow
+    moving_object_ratio: float   # fraction of flow points that are RANSAC outliers
 
 @dataclass
 class Scene:
@@ -211,9 +226,17 @@ class OpticalFlowAnalyzer:
         resized = cv2.resize(frame_bgr, (self.resize_width, new_h))
         return cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
-    def compute_between(self, frame_a: np.ndarray, frame_b: np.ndarray, ts: float) -> FlowStats:
+    def compute_full(
+        self, frame_a: np.ndarray, frame_b: np.ndarray, ts: float
+    ) -> tuple["FlowStats", Optional["FlowDecomposition"]]:
+        """
+        Compute Farnebäck optical flow once and return both FlowStats and
+        FlowDecomposition.  RANSAC homography fitting may fail on near-static
+        frames; in that case the decomposition entry is None.
+        """
         gray_a = self._resize(frame_a)
         gray_b = self._resize(frame_b)
+        H, W = gray_a.shape
 
         flow = cv2.calcOpticalFlowFarneback(
             gray_a, gray_b, None,
@@ -221,23 +244,82 @@ class OpticalFlowAnalyzer:
             iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
         )
 
+        # ── FlowStats ────────────────────────────────────────────────────────
         mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-
         mean_mag = float(mag.mean())
-
-        # Dominant direction: circular mean via vector averaging
         dx_mean = float(np.cos(ang).mean())
         dy_mean = float(np.sin(ang).mean())
         dominant_dir = float(np.arctan2(dy_mean, dx_mean))
-
-        # Coherence: length of mean direction vector (1 = all flow in same dir)
         coherence = float(np.sqrt(dx_mean ** 2 + dy_mean ** 2))
-
-        return FlowStats(
+        stats = FlowStats(
             timestamp=ts,
             mean_magnitude=mean_mag,
             dominant_direction=dominant_dir,
             coherence=coherence,
+        )
+
+        # ── FlowDecomposition ─────────────────────────────────────────────────
+        decomp = self._decompose(flow, H, W, ts)
+
+        return stats, decomp
+
+    def compute_between(self, frame_a: np.ndarray, frame_b: np.ndarray, ts: float) -> FlowStats:
+        """Thin wrapper kept for backward compatibility; prefer compute_full."""
+        stats, _ = self.compute_full(frame_a, frame_b, ts)
+        return stats
+
+    def _decompose(
+        self, flow: np.ndarray, H: int, W: int, ts: float
+    ) -> Optional["FlowDecomposition"]:
+        """
+        Fit a homography to the flow field via RANSAC to separate camera
+        ego-motion from independently moving objects.
+
+        Sparse grid (every 4 px) keeps memory O(1) relative to frame size and
+        gives RANSAC enough points without the N² cost of a dense solve.
+        """
+        coords = np.array(
+            [[x, y] for y in range(0, H, 4) for x in range(0, W, 4)],
+            dtype=np.float32,
+        )
+        dx = flow[::4, ::4, 0].flatten()
+        dy = flow[::4, ::4, 1].flatten()
+
+        if len(coords) < 4:
+            return None
+
+        dst = coords + np.stack([dx, dy], axis=1)
+        H_mat, inlier_mask = cv2.findHomography(
+            coords, dst, cv2.RANSAC, ransacReprojThreshold=2.0
+        )
+        if H_mat is None or inlier_mask is None:
+            return None
+
+        # Camera-only flow: project source points through the fitted homography
+        coords_h = np.concatenate([coords, np.ones((len(coords), 1))], axis=1)
+        warped = (H_mat @ coords_h.T).T
+        warped = warped[:, :2] / warped[:, 2:3]
+        camera_flow = warped - coords
+
+        actual_flow = np.stack([dx, dy], axis=1)
+        residual_flow = actual_flow - camera_flow
+
+        # Decompose homography into interpretable camera-motion primitives
+        tx = float(H_mat[0, 2])
+        ty = float(H_mat[1, 2])
+        angle = float(np.arctan2(H_mat[1, 0], H_mat[0, 0]))
+        scale = float(np.sqrt(H_mat[0, 0] ** 2 + H_mat[1, 0] ** 2))
+        outlier_ratio = float(1.0 - inlier_mask.sum() / len(inlier_mask))
+
+        return FlowDecomposition(
+            timestamp=ts,
+            pan=tx / W,
+            tilt=ty / H,
+            roll=float(np.degrees(angle)),
+            zoom=scale - 1.0,
+            camera_magnitude=float(np.linalg.norm(camera_flow, axis=1).mean()),
+            scene_activity=float(np.linalg.norm(residual_flow, axis=1).mean()),
+            moving_object_ratio=outlier_ratio,
         )
 
 
@@ -373,6 +455,52 @@ class SceneSegmenter:
         log.info(f"Ruptures found {len(boundaries)} boundaries (penalty={penalty})")
         return boundaries
 
+    def detect_flow_boundaries(
+        self,
+        flow_stats: list,
+        penalty: float = 3.0,
+    ) -> list[float]:
+        """
+        Detect scene boundaries using Pelt on optical flow statistics.
+
+        Signal: [mean_magnitude, coherence, sin(direction), cos(direction)].
+        Direction is encoded as sin/cos to preserve circular topology.
+        All channels are min-max normalised before fitting so the rbf kernel
+        treats them equally regardless of natural scale.
+
+        Returns a list of boundary timestamps (seconds).
+        """
+        if len(flow_stats) < 3:
+            return []
+
+        signal = np.array(
+            [
+                [
+                    f.mean_magnitude,
+                    f.coherence,
+                    np.sin(f.dominant_direction),
+                    np.cos(f.dominant_direction),
+                ]
+                for f in flow_stats
+            ],
+            dtype=float,
+        )
+
+        # Per-channel min-max normalisation
+        lo, hi = signal.min(axis=0), signal.max(axis=0)
+        rng = np.where(hi - lo > 0, hi - lo, 1.0)
+        signal = (signal - lo) / rng
+
+        algo = rpt.Pelt(model="rbf").fit(signal)
+        breakpoints = algo.predict(pen=penalty)
+        bp_indices = [b for b in breakpoints if b < len(flow_stats)]
+        boundaries = [float(flow_stats[b].timestamp) for b in bp_indices]
+
+        log.info(
+            f"Flow Pelt found {len(boundaries)} boundaries (penalty={penalty})"
+        )
+        return boundaries
+
 
 # ---------------------------------------------------------------------------
 # Main pipeline
@@ -441,17 +569,21 @@ class DronePipeline:
 
         # --- Pass 2: Optical flow (stream at flow_fps) ---
         # Only two frames are ever in memory at the same time.
-        log.info("=== Pass 2: Optical flow ===")
+        log.info("=== Pass 2: Optical flow + homography decomposition ===")
         flow_stats: list[FlowStats] = []
+        flow_decomp: list[FlowDecomposition] = []
         prev_frame_bgr: Optional[np.ndarray] = None
 
         for frame_rgb, ts, _ in tqdm(
             stream_frames(video_path, fps=self.flow_fps, width=self.flow_width),
-            desc=f"Optical flow @{self.flow_fps}fps",
+            desc=f"Flow+decomp @{self.flow_fps}fps",
         ):
             frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
             if prev_frame_bgr is not None:
-                flow_stats.append(self.flow.compute_between(prev_frame_bgr, frame_bgr, ts))
+                stats, decomp = self.flow.compute_full(prev_frame_bgr, frame_bgr, ts)
+                flow_stats.append(stats)
+                if decomp is not None:
+                    flow_decomp.append(decomp)
             prev_frame_bgr = frame_bgr
 
         # --- 3. Scene segmentation ---
@@ -463,6 +595,10 @@ class DronePipeline:
         # --- 4. Build scene objects ---
         scenes = self._build_scenes(all_boundaries, quality_metrics, flow_stats, embeddings, timestamps)
 
+        # --- 4b. Flow-based scene boundaries (Pelt on motion signal) ---
+        log.info("=== Detecting flow-based boundaries ===")
+        flow_boundaries = self.segmenter.detect_flow_boundaries(flow_stats)
+
         # --- 5. Assemble output ---
         result = {
             "video_path": str(video_path),
@@ -471,7 +607,9 @@ class DronePipeline:
             "scenes": [asdict(s) for s in scenes],
             "frame_metrics": [asdict(m) for m in quality_metrics],
             "flow_stats": [asdict(f) for f in flow_stats],
+            "flow_decomposition": [asdict(d) for d in flow_decomp],
             "boundaries": all_boundaries,
+            "flow_boundaries": flow_boundaries,
         }
 
         # Optionally save
@@ -708,6 +846,19 @@ if __name__ == "__main__":
             "selected pipeline steps. Skips videos with no existing JSON."
         ),
     )
+    parser.add_argument(
+        "--flow-only",
+        action="store_true",
+        help=(
+            "Skip embedding pass; re-run only flow-based boundary detection "
+            "(detect_flow_boundaries) on the flow_stats already stored in the JSON. "
+            "Requires --use-existing."
+        ),
+    )
+    parser.add_argument(
+        "--flow-penalty", type=float, default=4.0,
+        help="Pelt penalty for --flow-only (default: 3.0)",
+    )
     args = parser.parse_args()
 
     videos = _collect_videos(args.video)
@@ -720,7 +871,86 @@ if __name__ == "__main__":
     if batch_mode and args.output:
         log.warning("--output is ignored in directory mode; outputs are written next to each video.")
 
-    if args.use_existing:
+    # ── Flow-only branch ───────────────────────────────────────────────────
+    if args.flow_only:
+        if not args.use_existing:
+            log.error("--flow-only requires --use-existing")
+            raise SystemExit(1)
+
+        pending = [v for v in videos if _analysis_path(v).exists()]
+        missing = len(videos) - len(pending)
+        if missing:
+            log.warning(f"{missing} video(s) have no existing JSON and will be skipped.")
+        if not pending:
+            log.info("Nothing to do.")
+            raise SystemExit(0)
+        if batch_mode:
+            log.info(f"Found {len(videos)} video(s) — {missing} skipped, {len(pending)} to process (flow-only).")
+
+        segmenter = SceneSegmenter()
+        flow_analyzer = OpticalFlowAnalyzer(resize_width=args.flow_width)
+
+        for i, video_path in enumerate(pending, 1):
+            if batch_mode:
+                log.info(f"[{i}/{len(pending)}] Flow-only: {video_path.name}")
+
+            result = _load_existing_analysis(video_path)
+
+            # ── Re-run flow boundary detection from stored flow_stats ─────────
+            raw_flow = result.get("flow_stats", [])
+            if not raw_flow:
+                log.warning(f"No flow_stats in JSON for {video_path.name}, skipping.")
+                continue
+
+            flow_stats = [
+                FlowStats(
+                    timestamp=f["timestamp"],
+                    mean_magnitude=f["mean_magnitude"],
+                    dominant_direction=f["dominant_direction"],
+                    coherence=f["coherence"],
+                )
+                for f in raw_flow
+            ]
+            result["flow_boundaries"] = segmenter.detect_flow_boundaries(
+                flow_stats, penalty=args.flow_penalty
+            )
+
+            # ── Compute homography decomposition by streaming the video ───────
+            log.info(f"Computing flow decomposition for {video_path.name}")
+            flow_decomp: list[FlowDecomposition] = []
+            prev_bgr: Optional[np.ndarray] = None
+
+            for frame_rgb, ts, _ in tqdm(
+                stream_frames(str(video_path), fps=args.flow_fps, width=args.flow_width),
+                desc="Decomp",
+                leave=False,
+            ):
+                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                if prev_bgr is not None:
+                    _, decomp = flow_analyzer.compute_full(prev_bgr, frame_bgr, ts)
+                    if decomp is not None:
+                        flow_decomp.append(decomp)
+                prev_bgr = frame_bgr
+
+            result["flow_decomposition"] = [asdict(d) for d in flow_decomp]
+
+            out_path = _analysis_path(video_path) if batch_mode else (
+                Path(args.output) if args.output else _analysis_path(video_path)
+            )
+            with open(out_path, "w") as f:
+                json.dump(result, f, indent=2)
+            log.info(f"Saved → {out_path}")
+
+            fb = result["flow_boundaries"]
+            fd = result["flow_decomposition"]
+            print(f"\n{'=' * 60}")
+            print(f"Video: {result['video_path']}")
+            print(f"Flow boundaries  ({len(fb)}): {[round(b, 2) for b in fb]}")
+            print(f"Decomposition frames: {len(fd)}")
+
+        raise SystemExit(0)
+
+    if args.use_existing and not args.flow_only:
         log.warning("--use-existing has no effect without a step flag; running full pipeline.")
 
     # Filter out already-analyzed videos unless --reanalyze is set
