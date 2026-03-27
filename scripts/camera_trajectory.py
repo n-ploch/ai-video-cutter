@@ -72,6 +72,7 @@ class TrajectoryConfig:
     # checkerboard to get your unit's exact values. Approximate values for similar
     # DJI wide cameras: k1≈-0.03, k2≈0.01, p1≈0, p2≈0.
     dist_coeffs: Optional[list] = None
+    match_threshold: float = 0.1   # LightGlue confidence threshold (0–1)
     min_matches: int = 30
     ruptures_penalty: float = 3.0
     device: str = "auto"
@@ -203,7 +204,8 @@ class SuperPointLightGlue:
         log.info("SuperPoint+LightGlue ready")
 
     def match(
-        self, frame0_rgb: np.ndarray, frame1_rgb: np.ndarray
+        self, frame0_rgb: np.ndarray, frame1_rgb: np.ndarray,
+        threshold: float = 0.2,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Match keypoints between two RGB frames.
@@ -224,7 +226,7 @@ class SuperPointLightGlue:
              (frame1_rgb.shape[0], frame1_rgb.shape[1]))
         ]
         results = self.processor.post_process_keypoint_matching(
-            outputs, image_sizes, threshold=0.0
+            outputs, image_sizes, threshold=threshold
         )
         result = results[0]
         pts0 = result["keypoints0"].cpu().numpy().astype(np.float32)
@@ -400,7 +402,7 @@ class CameraTrajectoryPipeline:
             )
 
             if prev_frame is not None:
-                pts0, pts1 = self.matcher.match(prev_frame, frame_rgb)
+                pts0, pts1 = self.matcher.match(prev_frame, frame_rgb, cfg.match_threshold)
                 n_matches = len(pts0)
                 pose = estimate_pose(pts0, pts1, K, cfg.min_matches, dist)
             else:
@@ -531,6 +533,8 @@ def main():
                         help="Actual focal length in mm (default: 6.72, DJI Mini 4 Pro)")
     parser.add_argument("--sensor-width", type=float, default=9.7,
                         help="Sensor width in mm used for video (default: 9.7, DJI Mini 4 Pro)")
+    parser.add_argument("--match-threshold", type=float, default=0.2,
+                        help="LightGlue match confidence threshold 0–1 (default: 0.2)")
     parser.add_argument("--dist-coeffs",  type=float, nargs=4,
                         metavar=("K1", "K2", "P1", "P2"), default=None,
                         help="Lens distortion coefficients k1 k2 p1 p2. "
@@ -561,6 +565,7 @@ def main():
         focal_length_mm=args.focal_length,
         sensor_width_mm=args.sensor_width,
         dist_coeffs=args.dist_coeffs,
+        match_threshold=args.match_threshold,
         min_matches=args.min_matches,
         ruptures_penalty=args.penalty,
         device=args.device,
