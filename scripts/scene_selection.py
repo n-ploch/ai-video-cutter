@@ -814,7 +814,7 @@ def _collect_videos(target: str) -> list[Path]:
     """
     p = Path(target)
     if p.is_dir():
-        return sorted(f for f in p.iterdir() if f.suffix.lower() == ".mp4")
+        return sorted(f for f in p.iterdir() if f.suffix.lower() in [".mp4", ".mov"])
     return [p]
 
 
