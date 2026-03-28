@@ -24,7 +24,8 @@ import ffmpeg
 import torch
 from transformers import AutoModel, AutoProcessor
 from scipy.spatial.distance import cosine as cosine_dist
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, savgol_filter
+from scipy.stats import spearmanr
 import ruptures as rpt
 from tqdm import tqdm
 
@@ -83,6 +84,84 @@ class Scene:
     # Embedding index range: rows [emb_start, emb_end) in the .npy file
     emb_start: int = 0
     emb_end: int = 0
+    # Subsegments detected within this scene via Pelt(l1) on smoothed fd signal
+    subsegments: list = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Flow-decomposition signal helpers
+# ---------------------------------------------------------------------------
+# Ordered channels used for segmentation and metrics
+FD_SIGNAL_COLS = ["pan", "tilt", "zoom", "camera_magnitude"]
+
+
+def _fd_preprocess(
+    flow_decomp: list,
+    savgol_window: int = 11,
+    savgol_poly: int = 2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Build a [N, 4] signal matrix from FlowDecomposition entries, apply
+    Savitzky-Golay smoothing per channel, then min-max-normalise each channel.
+
+    Returns (X_norm, timestamps) where X_norm[:, i] corresponds to
+    FD_SIGNAL_COLS[i].  Smoothing window is clamped to an odd value ≤ N so
+    the function is safe for short clips.
+    """
+    if not flow_decomp:
+        return np.empty((0, 4)), np.empty(0)
+
+    X = np.array(
+        [[getattr(d, c) for c in FD_SIGNAL_COLS] for d in flow_decomp],
+        dtype=np.float64,
+    )
+    ts = np.array([d.timestamp for d in flow_decomp], dtype=np.float64)
+
+    n = len(X)
+    # Ensure window is ≤ n and odd
+    win = min(savgol_window, n if n % 2 == 1 else n - 1)
+    win = max(win, savgol_poly + 1 if (savgol_poly + 1) % 2 == 1 else savgol_poly + 2)
+
+    for i in range(X.shape[1]):
+        if n >= win:
+            X[:, i] = savgol_filter(X[:, i], window_length=win, polyorder=savgol_poly)
+
+    for i in range(X.shape[1]):
+        lo, hi = X[:, i].min(), X[:, i].max()
+        if hi - lo > 1e-8:
+            X[:, i] = (X[:, i] - lo) / (hi - lo)
+
+    return X, ts
+
+
+def _seg_metrics(sig: np.ndarray, ts: np.ndarray) -> dict:
+    """
+    Compute 7 descriptive motion metrics for a 1-D signal segment.
+
+    Parameters
+    ----------
+    sig : smoothed + normalised channel values for this (sub)segment
+    ts  : corresponding timestamps
+
+    Returns a dict with keys:
+        mean_abs, rms, entry_vel, exit_vel,
+        monotonicity, mean_abs_deriv, std_deriv
+    """
+    dt = float(np.median(np.diff(ts))) if len(ts) > 1 else 1.0
+    d1 = np.gradient(sig, dt)
+    n = len(sig)
+    win = max(1, n // 10)
+    mono = float(spearmanr(np.arange(n), sig).statistic) if n > 2 else float("nan")
+    mad = float(np.mean(np.abs(d1)))
+    return {
+        "mean_abs":       float(np.mean(np.abs(sig))),
+        "rms":            float(np.sqrt(np.mean(sig ** 2))),
+        "entry_vel":      float(np.mean(d1[:win])),
+        "exit_vel":       float(np.mean(d1[-win:])),
+        "monotonicity":   mono,
+        "mean_abs_deriv": mad,
+        "std_deriv":      float(np.std(d1)),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +534,32 @@ class SceneSegmenter:
         log.info(f"Ruptures found {len(boundaries)} boundaries (penalty={penalty})")
         return boundaries
 
+    def detect_fd_boundaries(
+        self,
+        X_norm: np.ndarray,
+        fd_timestamps: np.ndarray,
+        penalty: float = 3.0,
+    ) -> list[float]:
+        """
+        Primary scene segmentation: Pelt(l2) on the preprocessed flow-decomposition
+        signal [pan, tilt, zoom, camera_magnitude].
+
+        X_norm and fd_timestamps must already be smoothed and normalised
+        (output of _fd_preprocess).  Returns boundary timestamps (excludes
+        start/end of clip).
+        """
+        if len(X_norm) < 3:
+            return []
+        try:
+            bps = rpt.Pelt(model="l2").fit(X_norm).predict(pen=penalty)
+        except Exception as exc:
+            log.warning(f"FD Pelt(l2) failed: {exc}")
+            return []
+        bp_indices = [b - 1 for b in bps if b < len(fd_timestamps)]
+        boundaries = [float(fd_timestamps[i]) for i in bp_indices]
+        log.info(f"FD Pelt(l2) found {len(boundaries)} scene boundaries (penalty={penalty})")
+        return boundaries
+
     def detect_flow_boundaries(
         self,
         flow_stats: list,
@@ -519,53 +624,103 @@ class DronePipeline:
         emb_width: int = 448,
         flow_width: int = 640,
         embed_batch_size: int = 16,
+        fd_penalty: float = 3.0,
+        fd_subseg_penalty: float = 2.0,
+        savgol_window: int = 11,
+        savgol_poly: int = 2,
     ):
         self.embedding_fps = embedding_fps
         self.flow_fps = flow_fps
         self.emb_width = emb_width
         self.flow_width = flow_width
         self.embed_batch_size = embed_batch_size
+        self.fd_penalty = fd_penalty
+        self.fd_subseg_penalty = fd_subseg_penalty
+        self.savgol_window = savgol_window
+        self.savgol_poly = savgol_poly
         self.segmenter = SceneSegmenter(method=segmentation_method, window_size=window_size)
         self.quality = QualityAnalyzer()
         self.flow = OpticalFlowAnalyzer()
         self.embeddings_extractor = VisionModelWrapper(model_type=model_type, model_name=model_name)
 
-    def analyze(self, video_path: str, output_path: str = None) -> dict:
-        """Run full pipeline on a video file. Returns results dict."""
+    def analyze(
+        self, video_path: str, output_path: str = None, reuse_embeddings: bool = False
+    ) -> dict:
+        """Run full pipeline on a video file. Returns results dict.
 
-        # --- Pass 1: Embeddings + quality (stream at embedding_fps) ---
-        # Frames are never all in memory at once: we buffer at most `embed_batch_size`
-        # frames for the embedding model, then discard them.
-        log.info("=== Pass 1: Embeddings + quality metrics ===")
-        timestamps_list: list[float] = []
-        quality_metrics: list[FrameMetrics] = []
-        all_embeddings: list[np.ndarray] = []
-        frame_buffer: list[np.ndarray] = []  # RGB frames awaiting embedding
+        If *reuse_embeddings* is True and a matching .embeddings.npz file exists,
+        embeddings and their timestamps are loaded from disk and the embedding
+        model is never instantiated.  Quality metrics are recovered from the
+        existing .analysis.json when available; otherwise the frame-quality pass
+        still runs (without re-encoding embeddings).
+        """
+        emb_npz_path = _embeddings_path(Path(video_path))
+        existing_analysis = _load_existing_analysis(Path(video_path))
 
-        for frame_rgb, ts, _ in tqdm(
-            stream_frames(video_path, fps=self.embedding_fps, width=self.emb_width),
-            desc=f"Emb+Quality @{self.embedding_fps}fps",
-        ):
-            idx = len(timestamps_list)
-            timestamps_list.append(ts)
+        if reuse_embeddings and emb_npz_path.exists():
+            log.info(f"=== Pass 1: Loading existing embeddings from {emb_npz_path} ===")
+            npz = np.load(str(emb_npz_path))
+            embeddings = npz["embeddings"]
+            timestamps = npz["timestamps"]
 
-            # Quality metrics operate on BGR
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-            quality_metrics.append(self.quality.compute(ts, idx, frame_bgr))
+            if existing_analysis and existing_analysis.get("frame_metrics"):
+                log.info("Reusing frame_metrics from existing analysis JSON.")
+                quality_metrics = [
+                    FrameMetrics(
+                        timestamp=m["timestamp"],
+                        frame_idx=m["frame_idx"],
+                        sharpness=m["sharpness"],
+                        mean_brightness=m["mean_brightness"],
+                        highlight_clip_pct=m["highlight_clip_pct"],
+                        shadow_clip_pct=m["shadow_clip_pct"],
+                        brisque_score=m.get("brisque_score"),
+                    )
+                    for m in existing_analysis["frame_metrics"]
+                ]
+            else:
+                log.info("No existing frame_metrics; computing quality pass without embedding.")
+                quality_metrics = []
+                for frame_rgb, ts, _ in tqdm(
+                    stream_frames(video_path, fps=self.embedding_fps, width=self.emb_width),
+                    desc=f"Quality @{self.embedding_fps}fps",
+                ):
+                    idx = len(quality_metrics)
+                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                    quality_metrics.append(self.quality.compute(ts, idx, frame_bgr))
+        else:
+            # --- Pass 1: Embeddings + quality (stream at embedding_fps) ---
+            # Frames are never all in memory at once: we buffer at most `embed_batch_size`
+            # frames for the embedding model, then discard them.
+            log.info("=== Pass 1: Embeddings + quality metrics ===")
+            timestamps_list: list[float] = []
+            quality_metrics: list[FrameMetrics] = []
+            all_embeddings: list[np.ndarray] = []
+            frame_buffer: list[np.ndarray] = []  # RGB frames awaiting embedding
 
-            # Buffer for batch embedding
-            frame_buffer.append(frame_rgb)
-            if len(frame_buffer) >= self.embed_batch_size:
+            for frame_rgb, ts, _ in tqdm(
+                stream_frames(video_path, fps=self.embedding_fps, width=self.emb_width),
+                desc=f"Emb+Quality @{self.embedding_fps}fps",
+            ):
+                idx = len(timestamps_list)
+                timestamps_list.append(ts)
+
+                # Quality metrics operate on BGR
+                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                quality_metrics.append(self.quality.compute(ts, idx, frame_bgr))
+
+                # Buffer for batch embedding
+                frame_buffer.append(frame_rgb)
+                if len(frame_buffer) >= self.embed_batch_size:
+                    all_embeddings.append(self.embeddings_extractor.encode_images(frame_buffer))
+                    frame_buffer.clear()
+
+            # Flush remaining frames
+            if frame_buffer:
                 all_embeddings.append(self.embeddings_extractor.encode_images(frame_buffer))
                 frame_buffer.clear()
 
-        # Flush remaining frames
-        if frame_buffer:
-            all_embeddings.append(self.embeddings_extractor.encode_images(frame_buffer))
-            frame_buffer.clear()
-
-        timestamps = np.array(timestamps_list)
-        embeddings = np.concatenate(all_embeddings, axis=0) if all_embeddings else np.empty((0, 0))
+            timestamps = np.array(timestamps_list)
+            embeddings = np.concatenate(all_embeddings, axis=0) if all_embeddings else np.empty((0, 0))
 
         # --- Pass 2: Optical flow (stream at flow_fps) ---
         # Only two frames are ever in memory at the same time.
@@ -586,20 +741,34 @@ class DronePipeline:
                     flow_decomp.append(decomp)
             prev_frame_bgr = frame_bgr
 
-        # --- 3. Scene segmentation ---
-        log.info("=== Detecting scene boundaries ===")
-        boundaries = self.segmenter.detect_boundaries(embeddings, timestamps)
+        # --- 3. Preprocess flow-decomposition signal (savgol + normalise) ---
+        log.info("=== Preprocessing flow-decomposition signal ===")
+        X_norm, fd_timestamps = _fd_preprocess(
+            flow_decomp, self.savgol_window, self.savgol_poly
+        )
 
-        all_boundaries = [0.0] + boundaries + [timestamps[-1]]
+        # --- 4. Scene segmentation via Pelt(l2) on fd signal ---
+        log.info("=== Detecting scene boundaries (FD Pelt l2) ===")
+        fd_boundaries = self.segmenter.detect_fd_boundaries(
+            X_norm, fd_timestamps, penalty=self.fd_penalty
+        )
+        all_boundaries = [0.0] + fd_boundaries + [float(timestamps[-1])]
 
-        # --- 4. Build scene objects ---
-        scenes = self._build_scenes(all_boundaries, quality_metrics, flow_stats, embeddings, timestamps)
+        # --- 5. Build scene objects (with subsegments) ---
+        scenes = self._build_scenes(
+            all_boundaries, quality_metrics, flow_stats,
+            embeddings, timestamps, X_norm, fd_timestamps,
+        )
 
-        # --- 4b. Flow-based scene boundaries (Pelt on motion signal) ---
-        log.info("=== Detecting flow-based boundaries ===")
+        # --- 5b. Legacy flow-based boundaries (Pelt rbf on FlowStats — kept for reference) ---
+        log.info("=== Detecting flow-based boundaries (legacy rbf) ===")
         flow_boundaries = self.segmenter.detect_flow_boundaries(flow_stats)
 
-        # --- 5. Assemble output ---
+        # --- 5c. Legacy embedding-based boundaries (kept for reference) ---
+        log.info("=== Detecting embedding-based boundaries (legacy) ===")
+        emb_boundaries = self.segmenter.detect_boundaries(embeddings, timestamps)
+
+        # --- 6. Assemble output ---
         result = {
             "video_path": str(video_path),
             "duration": float(timestamps[-1]),
@@ -608,8 +777,11 @@ class DronePipeline:
             "frame_metrics": [asdict(m) for m in quality_metrics],
             "flow_stats": [asdict(f) for f in flow_stats],
             "flow_decomposition": [asdict(d) for d in flow_decomp],
+            # Primary scene boundaries come from FD Pelt(l2)
             "boundaries": all_boundaries,
+            # Legacy secondary boundaries kept for reference
             "flow_boundaries": flow_boundaries,
+            "emb_boundaries": emb_boundaries,
         }
 
         # Optionally save
@@ -619,10 +791,10 @@ class DronePipeline:
             json.dump(result, f, indent=2)
         log.info(f"Results saved to {output_path}")
 
-        # Save embeddings + timestamp index together
-        emb_path = str(_embeddings_path(Path(video_path)))
-        np.savez(emb_path, embeddings=embeddings, timestamps=timestamps)
-        log.info(f"Embeddings + timestamps saved to {emb_path}")
+        # Save embeddings + timestamp index (skip if we loaded them from disk)
+        if not (reuse_embeddings and emb_npz_path.exists()):
+            np.savez(str(emb_npz_path), embeddings=embeddings, timestamps=timestamps)
+            log.info(f"Embeddings + timestamps saved to {emb_npz_path}")
 
         return result
 
@@ -633,6 +805,8 @@ class DronePipeline:
         flow_stats: list[FlowStats],
         embeddings: np.ndarray,
         timestamps: np.ndarray,
+        X_norm: np.ndarray,
+        fd_timestamps: np.ndarray,
     ) -> list[Scene]:
         scenes = []
 
@@ -672,6 +846,10 @@ class DronePipeline:
             emb_start = int(scene_indices[0]) if len(scene_indices) > 0 else 0
             emb_end = int(scene_indices[-1] + 1) if len(scene_indices) > 0 else 0
 
+            subsegments = self._compute_subsegments(
+                start, end, X_norm, fd_timestamps, self.fd_subseg_penalty
+            )
+
             scenes.append(Scene(
                 scene_id=i,
                 start_time=round(start, 2),
@@ -686,6 +864,7 @@ class DronePipeline:
                 keyframe_timestamps=[round(t, 2) for t in keyframe_ts],
                 emb_start=emb_start,
                 emb_end=emb_end,
+                subsegments=subsegments,
             ))
 
         # Sort by quality score descending
@@ -736,6 +915,73 @@ class DronePipeline:
         total_weight = sum(w for _, _, w in scores)
         composite = sum(s * w for _, s, w in scores) / total_weight
         return float(np.clip(composite, 0, 1))
+
+    def _compute_subsegments(
+        self,
+        start: float,
+        end: float,
+        X_norm: np.ndarray,
+        fd_timestamps: np.ndarray,
+        penalty: float,
+    ) -> list[dict]:
+        """
+        Detect subsegments within a scene using Pelt(l1) on the already-smoothed
+        and normalised flow-decomposition signal.
+
+        For each subsegment the per-channel metrics are stored as:
+            channel_metrics: {
+                "pan":  {mean_abs, rms, entry_vel, exit_vel, monotonicity,
+                         mean_abs_deriv, std_deriv},
+                "tilt": {...},
+                "zoom": {...},
+            }
+
+        Velocity vectors can be recovered as:
+            entry_vel_vec = [sub["channel_metrics"][ch]["entry_vel"]
+                             for ch in ("pan", "tilt", "zoom")]
+        """
+        mask = (fd_timestamps >= start) & (fd_timestamps < end)
+        X_win = X_norm[mask]
+        ts_win = fd_timestamps[mask]
+
+        if len(X_win) < 3:
+            return []
+
+        try:
+            bps = rpt.Pelt(model="l1").fit(X_win).predict(pen=penalty)
+        except Exception as exc:
+            log.warning(f"Subsegment Pelt(l1) failed for scene {start:.1f}-{end:.1f}s: {exc}")
+            return []
+
+        # Build sub-boundaries: ts of the last sample before each breakpoint
+        sub_edges = (
+            [ts_win[0]]
+            + [float(ts_win[b - 1]) for b in bps if b < len(ts_win)]
+            + [ts_win[-1]]
+        )
+
+        # Channels to compute metrics for (indices in FD_SIGNAL_COLS / X_norm)
+        metric_channels = [("pan", 0), ("tilt", 1), ("zoom", 2)]
+
+        subsegments = []
+        for k in range(len(sub_edges) - 1):
+            t0, t1 = sub_edges[k], sub_edges[k + 1]
+            sub_mask = (ts_win >= t0) & (ts_win < t1)
+            if sub_mask.sum() < 2:
+                continue
+            channel_metrics = {
+                ch: _seg_metrics(X_win[sub_mask, idx], ts_win[sub_mask])
+                for ch, idx in metric_channels
+            }
+            subsegments.append({
+                "subsegment_id": k,
+                "start_time": round(float(t0), 3),
+                "end_time": round(float(t1), 3),
+                "duration": round(float(t1 - t0), 3),
+                "channel_metrics": channel_metrics,
+            })
+
+        return subsegments
 
     def _select_keyframes(
         self, embeddings: np.ndarray, timestamps: np.ndarray, max_keyframes: int = 3
@@ -837,6 +1083,16 @@ if __name__ == "__main__":
     parser.add_argument("--emb-width", type=int, default=448, help="Frame width for embedding pass")
     parser.add_argument("--flow-width", type=int, default=640, help="Frame width for optical flow pass")
     parser.add_argument("--batch-size", type=int, default=16, help="Embedding batch size")
+    parser.add_argument("--fd-penalty", type=float, default=3.0,
+                        help="Pelt(l2) penalty for primary FD scene segmentation (default: 3.0)")
+    parser.add_argument("--fd-subseg-penalty", type=float, default=2.0,
+                        help="Pelt(l1) penalty for per-scene subsegment detection (default: 2.0)")
+    parser.add_argument("--savgol-window", type=int, default=11,
+                        help="Savitzky-Golay window length for FD smoothing (default: 11, must be odd)")
+    parser.add_argument("--savgol-poly", type=int, default=2,
+                        help="Savitzky-Golay polynomial order for FD smoothing (default: 2)")
+    parser.add_argument("--reuse-embeddings", action="store_true",
+                        help="Load embeddings from existing .embeddings.npz if available, skip re-encoding")
     parser.add_argument("--reanalyze", action="store_true", help="Re-run even if output files already exist")
     parser.add_argument(
         "--use-existing",
@@ -934,6 +1190,17 @@ if __name__ == "__main__":
 
             result["flow_decomposition"] = [asdict(d) for d in flow_decomp]
 
+            # ── Re-run FD Pelt(l2) boundaries from freshly computed decomp ────
+            X_norm, fd_timestamps = _fd_preprocess(
+                flow_decomp, args.savgol_window, args.savgol_poly
+            )
+            fd_boundaries = segmenter.detect_fd_boundaries(
+                X_norm, fd_timestamps, penalty=args.fd_penalty
+            )
+            result["boundaries"] = [0.0] + fd_boundaries + (
+                [float(fd_timestamps[-1])] if len(fd_timestamps) else []
+            )
+
             out_path = _analysis_path(video_path) if batch_mode else (
                 Path(args.output) if args.output else _analysis_path(video_path)
             )
@@ -943,8 +1210,10 @@ if __name__ == "__main__":
 
             fb = result["flow_boundaries"]
             fd = result["flow_decomposition"]
+            bds = result["boundaries"]
             print(f"\n{'=' * 60}")
             print(f"Video: {result['video_path']}")
+            print(f"FD boundaries    ({len(bds)}): {[round(b, 2) for b in bds]}")
             print(f"Flow boundaries  ({len(fb)}): {[round(b, 2) for b in fb]}")
             print(f"Decomposition frames: {len(fd)}")
 
@@ -974,11 +1243,16 @@ if __name__ == "__main__":
         emb_width=args.emb_width,
         flow_width=args.flow_width,
         embed_batch_size=args.batch_size,
+        fd_penalty=args.fd_penalty,
+        fd_subseg_penalty=args.fd_subseg_penalty,
+        savgol_window=args.savgol_window,
+        savgol_poly=args.savgol_poly,
     )
 
     for i, video_path in enumerate(pending, 1):
         if batch_mode:
             log.info(f"[{i}/{len(pending)}] Processing {video_path.name}")
         output_path = None if batch_mode else args.output
-        result = pipeline.analyze(str(video_path), output_path=output_path)
+        result = pipeline.analyze(str(video_path), output_path=output_path,
+                                  reuse_embeddings=args.reuse_embeddings)
         _print_summary(result)
