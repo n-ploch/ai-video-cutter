@@ -757,7 +757,7 @@ class DronePipeline:
         # --- 5. Build scene objects (with subsegments) ---
         scenes = self._build_scenes(
             all_boundaries, quality_metrics, flow_stats,
-            embeddings, timestamps, X_norm, fd_timestamps,
+            embeddings, timestamps, X_norm, fd_timestamps, flow_decomp,
         )
 
         # --- 5b. Legacy flow-based boundaries (Pelt rbf on FlowStats — kept for reference) ---
@@ -807,6 +807,7 @@ class DronePipeline:
         timestamps: np.ndarray,
         X_norm: np.ndarray,
         fd_timestamps: np.ndarray,
+        flow_decomp: list,
     ) -> list[Scene]:
         scenes = []
 
@@ -847,7 +848,7 @@ class DronePipeline:
             emb_end = int(scene_indices[-1] + 1) if len(scene_indices) > 0 else 0
 
             subsegments = self._compute_subsegments(
-                start, end, X_norm, fd_timestamps, self.fd_subseg_penalty
+                start, end, X_norm, fd_timestamps, flow_decomp, self.fd_subseg_penalty
             )
 
             scenes.append(Scene(
@@ -922,19 +923,17 @@ class DronePipeline:
         end: float,
         X_norm: np.ndarray,
         fd_timestamps: np.ndarray,
+        flow_decomp: list,
         penalty: float,
     ) -> list[dict]:
         """
-        Detect subsegments within a scene using Pelt(l1) on the already-smoothed
-        and normalised flow-decomposition signal.
+        Detect subsegment boundaries using Pelt(l1) on the smoothed+normalised
+        signal (X_norm), then compute per-channel metrics on the *raw*
+        flow-decomposition values so they carry physical meaning.
 
-        For each subsegment the per-channel metrics are stored as:
-            channel_metrics: {
-                "pan":  {mean_abs, rms, entry_vel, exit_vel, monotonicity,
-                         mean_abs_deriv, std_deriv},
-                "tilt": {...},
-                "zoom": {...},
-            }
+        channel_metrics keys: pan, tilt, zoom
+        Each contains: mean_abs, rms, entry_vel, exit_vel,
+                        monotonicity, mean_abs_deriv, std_deriv
 
         Velocity vectors can be recovered as:
             entry_vel_vec = [sub["channel_metrics"][ch]["entry_vel"]
@@ -960,18 +959,28 @@ class DronePipeline:
             + [ts_win[-1]]
         )
 
-        # Channels to compute metrics for (indices in FD_SIGNAL_COLS / X_norm)
-        metric_channels = [("pan", 0), ("tilt", 1), ("zoom", 2)]
+        # Raw signal matrix — same timestamp axis as X_norm
+        raw_cols = ["pan", "tilt", "zoom"]
+        X_raw = np.array(
+            [[getattr(d, c) for c in raw_cols] for d in flow_decomp],
+            dtype=np.float64,
+        )
+        raw_ts = np.array([d.timestamp for d in flow_decomp])
+        raw_mask = (raw_ts >= start) & (raw_ts < end)
+        X_raw_win = X_raw[raw_mask]
+        ts_raw_win = raw_ts[raw_mask]
+
+        metric_channels = list(enumerate(raw_cols))  # [(0, "pan"), ...]
 
         subsegments = []
         for k in range(len(sub_edges) - 1):
             t0, t1 = sub_edges[k], sub_edges[k + 1]
-            sub_mask = (ts_win >= t0) & (ts_win < t1)
-            if sub_mask.sum() < 2:
+            sub_mask_raw = (ts_raw_win >= t0) & (ts_raw_win < t1)
+            if sub_mask_raw.sum() < 2:
                 continue
             channel_metrics = {
-                ch: _seg_metrics(X_win[sub_mask, idx], ts_win[sub_mask])
-                for ch, idx in metric_channels
+                ch: _seg_metrics(X_raw_win[sub_mask_raw, idx], ts_raw_win[sub_mask_raw])
+                for idx, ch in metric_channels
             }
             subsegments.append({
                 "subsegment_id": k,
