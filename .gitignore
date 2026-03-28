@@ -1,0 +1,9 @@
+.edit
+
+*__pycache__
+
+local/
+
+logs/
+
+.DS_STORE
