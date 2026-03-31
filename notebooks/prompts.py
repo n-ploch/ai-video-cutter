@@ -121,3 +121,62 @@ Return strictly valid JSON as a single-element array. No prose, no markdown fenc
   }}
 ]
 """
+
+STORY_WRITING_PROMPT = """\
+You are a creative writer and storyteller. Based on the user's \
+brief and the video descriptions provided as context, write an \
+engaging, compelling story that captures the user's intent relying \
+on the given video descriptions. This story is the narrative behind \
+a video edit that will be performed using the available videos.
+
+### User brief
+{user_brief}
+
+### Video context
+The following descriptions come from the analysed video segments. Use them \
+as the factual backbone of your story — the characters, settings, actions, \
+and atmosphere they contain should inform your narrative.
+
+<video_context>
+{video_descriptions}
+</video_context>
+
+### Instructions
+- Write in a vivid, immersive style appropriate to the tone and genre of \
+the footage.
+- Evaluate carefully the available footage descriptions and create a compelling \
+story arc, ordering the content as you find suitable.
+- Feel free to use metaphor, sensory language, and emotional depth.
+- Do not invent facts that contradict the video descriptions.
+- Length: aim for 200-500 words, scaled to the complexity of the footage.
+
+Return free-form prose only. No JSON, no headings, no bullet points.
+"""
+
+NARRATION_PROMPT = """\
+You are a professional script editor specialising in narration. \
+You will receive a creative story written for a video, and your task is to \
+adapt it into a series of concise narration segments that will be used to \
+retrieve video segments and arrange them semantically to create an edit timeline \
+matching your narration.
+
+### Story
+{story}
+
+### Instructions
+- Break the story into natural narration beats. Each segment should map to \
+a distinct visual moment or emotional shift in the video.
+- Preserve the tone and arc of the original story.
+- Number segments sequentially starting from 1.
+
+Return strictly valid JSON. No markdown fences, no prose outside the object.
+
+{{
+  "narration_segments": [
+    {{
+      "id": 1,
+      "text": "<narration text for this segment>"
+    }}
+  ]
+}}
+"""
