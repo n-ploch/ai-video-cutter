@@ -32,24 +32,26 @@ You are a Professional Video Editor and Colorist performing a detailed analysis 
 of a single scene extracted from a larger video.
 
 ### Global context
-The following is a high-level summary of the full video this scene belongs to. \
-Use it to understand narrative and stylistic context, but focus your analysis \
+The following is a high-level summary of the full video this scene belongs to,
+together with the splitting of the video in segments. \
+Use this to understand narrative and stylistic context, but focus your analysis \
 on what is visible in *this* clip.
 
 <global_context>
-{global_summary}
+Global Summary: {global_summary}
+
+Segments: {segments}
 </global_context>
 
-### Scene info
-- **Scene ID:** {scene_id}
-- **Position in video:** {timestamp_range}
+### Segment info
+- **Segment ID:** {segment_id}
 
 ### Output format
 Return strictly valid JSON as a single-element array. No prose, no markdown fences.
 
 [
   {{
-    "scene_id": <string matching the one given>,
+    "segment_id": <string matching the one given>,
     "description": "Narrative summary following the pattern: [Subject] [Action] in [Environment]. E.g. 'Medium shot of a hiker reaching the summit during golden hour.'",
     "technical_specs": {{
       "framing": "One of: Extreme Wide Shot | Wide Shot | Medium Shot | Medium Close-Up | Close-Up | Extreme Close-Up | Over-the-Shoulder | POV Shot",
@@ -78,7 +80,7 @@ Return strictly valid JSON as a single-element array. No prose, no markdown fenc
       "rating": "One of: excellent | good | medium | bad",
       "reasoning": "Brief evaluation of aesthetic and cinematographic quality."
     }},
-    "scene_tags": ["max 7 keywords describing the scene"]
+    "segment_tags": ["max 7 keywords describing the segment"]
   }}
 ]
 
@@ -86,7 +88,7 @@ Return strictly valid JSON as a single-element array. No prose, no markdown fenc
 
 [
   {{
-    "scene_id": 1,
+    "segment_id": 1,
     "description": "Aerial bird's-eye view of a turquoise alpine lake surrounded by jagged limestone peaks. A small red boat is centred, creating a focal point against the water.",
     "technical_specs": {{
       "framing": "Wide Shot",
@@ -95,7 +97,7 @@ Return strictly valid JSON as a single-element array. No prose, no markdown fenc
       "reasoning": {{
         "framing": "The frame captures the full lake and surrounding peaks, emphasising scale and environment.",
         "movement": "The camera descends steadily toward the boat, increasing its visual weight over time.",
-        "angle": "Near-vertical perspective flattens the scene into a map-like composition with minimal depth."
+        "angle": "Near-vertical perspective flattens the segment into a map-like composition with minimal depth."
       }}
     }},
     "color_profile": {{
@@ -115,7 +117,7 @@ Return strictly valid JSON as a single-element array. No prose, no markdown fenc
       "rating": "excellent",
       "reasoning": "High dynamic range rendered cleanly; smooth gimbal movement delivers a professional cinematic feel with no visible compression artifacts."
     }},
-    "scene_tags": ["alpine", "lake", "drone", "aerial", "nature", "turquoise", "serene"]
+    "segment_tags": ["alpine", "lake", "drone", "aerial", "nature", "turquoise", "serene"]
   }}
 ]
 """
