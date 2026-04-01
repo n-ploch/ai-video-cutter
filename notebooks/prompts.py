@@ -123,11 +123,11 @@ Return strictly valid JSON as a single-element array. No prose, no markdown fenc
 """
 
 STORY_WRITING_PROMPT = """\
-You are a creative writer and storyteller. Based on the user's \
+You are a creative screenwriter. Based on the user's \
 brief and the video descriptions provided as context, write an \
-engaging, compelling story that captures the user's intent relying \
-on the given video descriptions. This story is the narrative behind \
-a video edit that will be performed using the available videos.
+engaging, compelling story that captures the user's intent and covers \
+the given video descriptions. This story serves as the blueprint for \ 
+editing the available footage in a later step.
 
 ### User brief
 {user_brief}
@@ -142,12 +142,13 @@ and atmosphere they contain should inform your narrative.
 </video_context>
 
 ### Instructions
-- Write in a vivid, immersive style appropriate to the tone and genre of \
-the footage.
+- Write in a vivid, immersive style.
+- Adapt tone and genre to the footage.
 - Evaluate carefully the available footage descriptions and create a compelling \
 story arc, ordering the content as you find suitable.
-- Feel free to use metaphor, sensory language, and emotional depth.
-- Do not invent facts that contradict the video descriptions.
+- Ensure your story covers most of the video footage.
+- Feel free to use sensory language and emotional depth.
+- Do not invent facts that clearly contradict the video descriptions.
 - Length: aim for 200-500 words, scaled to the complexity of the footage.
 
 Return free-form prose only. No JSON, no headings, no bullet points.
