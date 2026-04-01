@@ -155,11 +155,13 @@ Return free-form prose only. No JSON, no headings, no bullet points.
 """
 
 NARRATION_PROMPT = """\
-You are a professional script editor specialising in narration. \
-You will receive a creative story written for a video, and your task is to \
-adapt it into a series of concise narration segments that will be used to \
+You are a professional movie director. \
+You will receive a creative story from your screenwriter and your task is to \
+create a storyboard out of it. For this, separate the story into coherent narration segments first. \
+Then, create detailed scene descriptions from these narration segments. \
+This storyboard will be used to create the editing script, which will \
 retrieve video segments and arrange them semantically to create an edit timeline \
-matching your narration.
+matching the storyboard.
 
 ### Story
 {story}
@@ -167,16 +169,20 @@ matching your narration.
 ### Instructions
 - Break the story into natural narration beats. Each segment should map to \
 a distinct visual moment or emotional shift in the video.
+- In the scene descriptions, use descriptive language useful for matching with video descriptions semantically.
 - Preserve the tone and arc of the original story.
-- Number segments sequentially starting from 1.
+- Number scenes sequentially starting from 1.
 
 Return strictly valid JSON. No markdown fences, no prose outside the object.
 
 {{
-  "narration_segments": [
+  "scenes": [
     {{
       "id": 1,
-      "text": "<narration text for this segment>"
+      "narration_segment": "<Segment of the original story serving as content anchor>"
+      "scene_description": "<narration text for this segment>"
+      "reasoning": "<short reasoning about the range of the chosen segment and the crafted scene>" 
+      "keywords": [List of max 7 keywords describing the scene]
     }}
   ]
 }}
