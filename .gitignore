@@ -7,3 +7,5 @@ local/
 logs/
 
 .DS_STORE
+
+CLAUDE.md
