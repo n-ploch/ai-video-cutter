@@ -155,13 +155,11 @@ Return free-form prose only. No JSON, no headings, no bullet points.
 """
 
 NARRATION_PROMPT = """\
-You are a professional movie director. \
-You will receive a creative story from your screenwriter and your task is to \
-create a storyboard out of it. For this, separate the story into coherent narration segments first. \
-Then, create detailed scene descriptions from these narration segments. \
-This storyboard will be used to create the editing script, which will \
+You are a professional script editor specialising in narration. \
+You will receive a creative story written for a video, and your task is to \
+adapt it into a series of concise narration scenes that will be used to \
 retrieve video segments and arrange them semantically to create an edit timeline \
-matching the storyboard.
+matching your narration.
 
 ### Story
 {story}
@@ -169,6 +167,33 @@ matching the storyboard.
 ### Instructions
 - Break the story into natural narration beats. Each segment should map to \
 a distinct visual moment or emotional shift in the video.
+- Preserve the tone and arc of the original story.
+- Number segments sequentially starting from 1.
+
+Return strictly valid JSON. No markdown fences, no prose outside the object.
+
+{{
+  "narration_segments": [
+    {{
+      "id": 1,
+      "text": "<narration text for this segment>"
+    }}
+  ]
+}}
+"""
+
+STORYBOARD_PROMPT = """
+You are a professional movie director. \
+You will receive a list of narration segments from your screenwriter and your task is to \
+create a storyboard out of it. For this, create detailed scene descriptions from these narration segments. \
+This storyboard will be used to create the editing script, which will \
+retrieve video segments and arrange them semantically to create an edit timeline \
+matching the storyboard.
+
+### Narration Segments
+{narration_segments}
+
+### Instructions
 - In the scene descriptions, use descriptive language useful for matching with video descriptions semantically.
 - Preserve the tone and arc of the original story.
 - Number scenes sequentially starting from 1.
@@ -177,13 +202,13 @@ Return strictly valid JSON. No markdown fences, no prose outside the object.
 
 {{
   "scenes": [
-    {{
+{{
       "id": 1,
       "narration_segment": "<Segment of the original story serving as content anchor>"
       "scene_description": "<narration text for this segment>"
       "reasoning": "<short reasoning about the range of the chosen segment and the crafted scene>" 
       "keywords": [List of max 7 keywords describing the scene]
-    }}
+}}
   ]
 }}
 """
