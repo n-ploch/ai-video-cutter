@@ -193,6 +193,14 @@ matching the storyboard.
 ### Narration Segments
 {narration_segments}
 
+### Video context
+The following descriptions come from the analysed video segments. Use them \
+to align your scene descriptions with the available content.
+
+<video_context>
+{video_descriptions}
+</video_context>
+
 ### Instructions
 - In the scene descriptions, use descriptive language useful for matching with video descriptions semantically.
 - Preserve the tone and arc of the original story.
