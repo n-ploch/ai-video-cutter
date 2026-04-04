@@ -40,9 +40,11 @@ class VideoConfig(BaseModel):
 
 
 class VlmConfig(BaseModel):
-    provider: str = "anthropic"
-    model: str = "claude-opus-4-6"
+    provider: str = "gemini"
+    model: str = "gemini-2.0-flash"
     temperature: float = 0.3
+    gemini_api_key: str | None = None  # falls back to GEMINI_API_KEY env var
+    request_delay_s: float = 2.0       # rate-limit pause between segment API calls
 
 
 class StoryboardConfig(BaseModel):
