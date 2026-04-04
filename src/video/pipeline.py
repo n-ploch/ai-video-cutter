@@ -224,13 +224,20 @@ class OpticalFlowStep(PipelineStep):
         import ffmpeg
 
         source = ctx.downsampled_path or ctx.video_path
-        fps = self.proc_config.target_fps
         width = self.proc_config.target_width
         hwaccel = self.proc_config.hwaccel
 
         probe = ffmpeg.probe(str(source))
         vs = next(s for s in probe["streams"] if s["codec_type"] == "video")
         orig_w, orig_h = int(vs["width"]), int(vs["height"])
+
+        # Resolve fps: use configured value or fall back to the native stream fps.
+        if self.proc_config.target_fps is not None:
+            fps = self.proc_config.target_fps
+        else:
+            num, den = (int(x) for x in vs["r_frame_rate"].split("/"))
+            fps = num / den
+
         target_h = int(width * orig_h / orig_w)
         if target_h % 2:
             target_h += 1

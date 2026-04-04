@@ -16,7 +16,7 @@ DEFAULT_YAML = REPO_ROOT / "config" / "default.yaml"
 
 def test_load_default_config():
     settings = Settings.load(DEFAULT_YAML)
-    assert isinstance(settings.video.target_fps, float)
+    assert settings.video.target_fps is None  # default is native fps
     assert isinstance(settings.video.target_width, int)
     assert isinstance(settings.vlm.model, str)
     assert isinstance(settings.storyboard.review_threshold, float)
@@ -37,7 +37,7 @@ def test_load_empty_yaml_uses_defaults(tmp_path):
     cfg = tmp_path / "empty.yaml"
     cfg.write_text("")
     settings = Settings.load(cfg)
-    assert settings.video.target_fps == 4.0
+    assert settings.video.target_fps is None  # default is native fps
 
 
 # ── config_hash ───────────────────────────────────────────────────────────────

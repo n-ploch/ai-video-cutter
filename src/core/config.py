@@ -31,7 +31,7 @@ class VideoSegmentationConfig(BaseModel):
 
 
 class VideoConfig(BaseModel):
-    target_fps: float = 4.0
+    target_fps: float | None = None  # None → preserve native fps
     target_width: int = 640
     output_format: str = "mp4"
     hwaccel: str | None = None

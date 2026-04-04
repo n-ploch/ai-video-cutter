@@ -27,8 +27,8 @@ class FrameMetrics(BaseModel):
 
 
 class ProcessingConfig(BaseModel):
-    target_fps: float = 4.0
-    target_width: int = 640   # height is derived from aspect ratio
+    target_fps: float | None = None  # None → preserve native fps
+    target_width: int = 640          # height is derived from aspect ratio
     output_format: str = "mp4"
     hwaccel: str | None = None  # e.g. "videotoolbox" (macOS), "cuda", "vaapi"
 

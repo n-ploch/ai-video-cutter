@@ -1,5 +1,5 @@
 video:
-  target_fps: 4.0
+  target_fps: null
   target_width: 640
   output_format: mp4
   hwaccel: null
