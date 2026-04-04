@@ -52,9 +52,23 @@ class VlmConfig(BaseModel):
     request_delay_s: float = 2.0       # rate-limit pause between segment API calls
 
 
+class AgentLLMConfig(BaseModel):
+    provider: str = "mistral"
+    model: str = "mistral-large-latest"
+    temperature: float = 0.5
+    base_url: str | None = None         # required for mistral/vllm
+    api_key: str | None = None          # falls back to env var (MISTRAL_API_KEY, OPENAI_API_KEY, etc.)
+    extra_headers: dict[str, str] = {}  # for additional auth headers
+
+
 class StoryboardConfig(BaseModel):
-    model: str = "claude-opus-4-6"
+    max_revisions: int = 2
     review_threshold: float = 0.7
+    human_in_the_loop: bool = False
+    story_writer: AgentLLMConfig = AgentLLMConfig(temperature=0.7)
+    narrator: AgentLLMConfig = AgentLLMConfig(temperature=0.3)
+    director: AgentLLMConfig = AgentLLMConfig(temperature=0.5)
+    judge: AgentLLMConfig = AgentLLMConfig(temperature=0.1)
 
 
 class EditorConfig(BaseModel):
