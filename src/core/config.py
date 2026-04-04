@@ -64,8 +64,10 @@ class AgentLLMConfig(BaseModel):
 class StoryboardConfig(BaseModel):
     max_revisions: int = 2
     review_threshold: float = 0.7
+    context_threshold: float = 0.5   # hard floor for story context_adherence score
     human_in_the_loop: bool = False
     story_writer: AgentLLMConfig = AgentLLMConfig(temperature=0.7)
+    story_judge: AgentLLMConfig = AgentLLMConfig(temperature=0.1)
     narrator: AgentLLMConfig = AgentLLMConfig(temperature=0.3)
     director: AgentLLMConfig = AgentLLMConfig(temperature=0.5)
     judge: AgentLLMConfig = AgentLLMConfig(temperature=0.1)
