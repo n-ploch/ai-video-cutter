@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Literal
 
 import cv2
 import numpy as np
+from tqdm import tqdm
 
 from core.schemas.segment import SegmentBase
 from core.schemas.video import FrameMetrics, ProcessingConfig, SegmentationConfig
@@ -165,6 +166,7 @@ class OpticalFlowStep(PipelineStep):
         if target_h % 2:
             target_h += 1
         frame_bytes = width * target_h * 3
+        total_frames = int(float(probe["format"]["duration"]) * fps)
 
         input_kwargs = {"hwaccel": hwaccel} if hwaccel else {}
         proc = (
@@ -181,27 +183,29 @@ class OpticalFlowStep(PipelineStep):
         frame_idx = 0
 
         try:
-            while True:
-                raw = proc.stdout.read(frame_bytes)
-                if len(raw) != frame_bytes:
-                    break
-                frame_idx += 1
-                timestamp = frame_idx / fps
-                rgb = np.frombuffer(raw, dtype="uint8").reshape((target_h, width, 3)).copy()
-                bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                gray = resize_for_flow(bgr)
+            with tqdm(total=total_frames, desc=source.name, unit="fr") as pbar:
+                while True:
+                    raw = proc.stdout.read(frame_bytes)
+                    if len(raw) != frame_bytes:
+                        break
+                    frame_idx += 1
+                    pbar.update(1)
+                    timestamp = frame_idx / fps
+                    rgb = np.frombuffer(raw, dtype="uint8").reshape((target_h, width, 3)).copy()
+                    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                    gray = resize_for_flow(bgr)
 
-                if prev_gray is not None:
-                    flow = compute_flow(prev_gray, gray)
-                    mag, _, coherence = flow_statistics(flow)
-                    decomp = decompose_flow(flow)
-                    frame_metrics.append(
-                        compute_frame_metrics(frame_idx, timestamp, mag, coherence, decomp)
-                    )
-                    if decomp is not None:
-                        raw_rows.append(signal_row(timestamp, frame_idx, decomp))
+                    if prev_gray is not None:
+                        flow = compute_flow(prev_gray, gray)
+                        mag, _, coherence = flow_statistics(flow)
+                        decomp = decompose_flow(flow)
+                        frame_metrics.append(
+                            compute_frame_metrics(frame_idx, timestamp, mag, coherence, decomp)
+                        )
+                        if decomp is not None:
+                            raw_rows.append(signal_row(timestamp, frame_idx, decomp))
 
-                prev_gray = gray
+                    prev_gray = gray
         finally:
             proc.stdout.close()
             proc.wait()

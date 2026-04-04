@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from core.config import Settings
 from core.schemas.video import ProcessingConfig, SegmentationConfig
-from core.storage import ProjectStorage
+from core.storage import ProjectStorage, hash_video_file
 from video.pipeline import default_pipeline
 
 log = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ def process(
     hwaccel: Optional[str] = typer.Option(None, help="ffmpeg hwaccel backend (e.g. videotoolbox, cuda)"),
     storage_root: Path = typer.Option(Path("local/data/projects"), help="Project storage root"),
     project_name: Optional[str] = typer.Option(None, help="Project name (defaults to video stem)"),
+    force: bool = typer.Option(False, "--force", help="Reprocess even if already up to date"),
 ):
     """Run a video through the optical-flow segmentation pipeline."""
     if not video.exists():
@@ -48,6 +49,16 @@ def process(
         raise typer.Exit(1)
 
     settings = Settings.load(config_path)
+    storage = ProjectStorage(root=storage_root, default_config=config_path)
+    name = project_name or video.stem
+    video_hash = hash_video_file(video)
+    if not force and storage.is_step_current(name, video_hash, "segmented", settings):
+        out_dir = storage.get_project_path(name) / "analysis"
+        typer.echo(
+            f"Already processed. Project: {name}  Output: {out_dir}/  "
+            f"(use --force to reprocess)"
+        )
+        raise typer.Exit(0)
 
     proc_config = ProcessingConfig(
         target_fps=flow_fps if flow_fps is not None else settings.video.target_fps,
@@ -60,9 +71,6 @@ def process(
         savgol_window=savgol_window if savgol_window is not None else settings.video.segmentation.savgol_window,
         savgol_poly=savgol_poly if savgol_poly is not None else settings.video.segmentation.savgol_poly,
     )
-
-    storage = ProjectStorage(root=storage_root, default_config=config_path)
-    name = project_name or video.stem
 
     ctx = default_pipeline(proc_config, seg_config, storage, config=settings).run(video, project_name=name)
 
