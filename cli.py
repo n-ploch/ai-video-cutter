@@ -153,5 +153,43 @@ def create(
     typer.echo(f"Status  : {project.status.value}")
 
 
+@app.command()
+def storyboard(
+    project_name: Annotated[str, typer.Argument(help="Name of an already-processed project")],
+    brief: Annotated[str, typer.Option("--brief", "-b", help="Creative brief for the story")],
+    config_path: Path = typer.Option(
+        _DEFAULT_CONFIG,
+        "--config",
+        help="Path to YAML config file",
+    ),
+    storage_root: Path = typer.Option(Path("local/data/projects"), help="Project storage root"),
+):
+    """Run the storyboard agent on a processed project.
+
+    Reads segment descriptions from storage, then runs the LangGraph pipeline
+    (story writer → narrator → director → judge) to produce a versioned storyboard.
+    """
+    from storyboard.graph import run as run_storyboard
+
+    settings = Settings.load(config_path)
+    storage = ProjectStorage(root=storage_root, default_config=config_path)
+
+    typer.echo(f"Running storyboard agent for project '{project_name}' …")
+    output = run_storyboard(
+        project_name=project_name,
+        user_brief=brief,
+        cfg=settings.storyboard,
+        storage=storage,
+    )
+
+    out_dir = storage.get_project_path(project_name) / "storyboard"
+    typer.echo(
+        f"Done.  Scenes: {len(output.scenes)}  "
+        f"Revisions: {output.revision_count}  "
+        f"Score: {output.judge_result.score:.2f}  "
+        f"Output: {out_dir}/latest.json"
+    )
+
+
 if __name__ == "__main__":
     app()
