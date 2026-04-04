@@ -30,7 +30,7 @@ def test_load_custom_yaml(tmp_path):
     assert settings.video.target_fps == 2.0
     assert settings.video.target_width == 320
     # Non-specified keys fall back to defaults.
-    assert settings.vlm.provider == "anthropic"
+    assert settings.vlm.provider == "gemini"
 
 
 def test_load_empty_yaml_uses_defaults(tmp_path):
