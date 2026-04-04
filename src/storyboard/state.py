@@ -10,6 +10,15 @@ class StoryboardState(TypedDict):
     story: str
     narration_beats: list[dict]   # [{"id": int, "text": str}]
     scenes: list[dict]            # [{"id", "narration_segment", "scene_description", "reasoning", "keywords"}]
+    # story judge
+    story_judge_narrative_quality: float
+    story_judge_brief_adherence: float
+    story_judge_context_adherence: float
+    story_judge_total_score: float
+    story_judge_feedback: str
+    story_judge_decision: str
+    story_revision_count: int
+    # storyboard judge
     judge_score: float
     judge_feedback: str
     judge_decision: str           # "approve" | "revise" | "escalate"

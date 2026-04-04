@@ -15,6 +15,7 @@ from storyboard.nodes import (
     make_judge_node,
     make_narrator_node,
     make_persist_node,
+    make_story_judge_node,
     make_story_writer_node,
 )
 from storyboard.state import StoryboardState
@@ -34,6 +35,10 @@ def _format_video_descriptions(segments: list[Segment]) -> str:
     return "\n".join(lines) if lines else "(no segment descriptions available)"
 
 
+def _route_story_judge(state: StoryboardState) -> str:
+    return "narrator" if state["story_judge_decision"] == "approve" else "story_writer"
+
+
 def _route_judge(state: StoryboardState) -> str:
     decision = state["judge_decision"]
     if decision == "approve":
@@ -50,6 +55,7 @@ def build_graph(
 ) -> StateGraph:
     """Build and compile the storyboard LangGraph graph."""
     story_writer_llm = create_llm(cfg.story_writer)
+    story_judge_llm = create_llm(cfg.story_judge)
     narrator_llm = create_llm(cfg.narrator)
     director_llm = create_llm(cfg.director)
     judge_llm = create_llm(cfg.judge)
@@ -57,13 +63,19 @@ def build_graph(
     graph = StateGraph(StoryboardState)
 
     graph.add_node("story_writer", make_story_writer_node(story_writer_llm))
+    graph.add_node("story_judge", make_story_judge_node(story_judge_llm, cfg.review_threshold, cfg.context_threshold))
     graph.add_node("narrator", make_narrator_node(narrator_llm))
     graph.add_node("director", make_director_node(director_llm))
     graph.add_node("judge", make_judge_node(judge_llm, cfg.review_threshold))
     graph.add_node("persist", make_persist_node(storage, project_name))
 
     graph.add_edge(START, "story_writer")
-    graph.add_edge("story_writer", "narrator")
+    graph.add_edge("story_writer", "story_judge")
+    graph.add_conditional_edges(
+        "story_judge",
+        _route_story_judge,
+        {"narrator": "narrator", "story_writer": "story_writer"},
+    )
     graph.add_edge("narrator", "director")
     graph.add_edge("director", "judge")
     graph.add_conditional_edges(
@@ -127,6 +139,15 @@ def run(
         "story": "",
         "narration_beats": [],
         "scenes": [],
+        # story judge
+        "story_judge_narrative_quality": 0.0,
+        "story_judge_brief_adherence": 0.0,
+        "story_judge_context_adherence": 0.0,
+        "story_judge_total_score": 0.0,
+        "story_judge_feedback": "",
+        "story_judge_decision": "",
+        "story_revision_count": 0,
+        # storyboard judge
         "judge_score": 0.0,
         "judge_feedback": "",
         "judge_decision": "",
