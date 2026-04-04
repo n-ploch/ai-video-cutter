@@ -38,13 +38,27 @@ def extract_clip(
 
     try:
         if fast_seek:
-            stream = ffmpeg.input(str(video_path), ss=start, t=duration)
+            # Input-side -ss seeks to the nearest keyframe before `start` (fast).
+            # -t must be on the output, not the input: with stream copy, input-side
+            # -t is ignored and ffmpeg copies to end-of-file from the keyframe.
+            stream = (
+                ffmpeg.input(str(video_path), ss=start)
+                .output(
+                    str(output_path),
+                    c="copy",
+                    t=duration,
+                    avoid_negative_ts="make_zero",
+                )
+            )
         else:
-            stream = ffmpeg.input(str(video_path)).filter("trim", start=start, end=end)
+            stream = (
+                ffmpeg.input(str(video_path))
+                .filter("trim", start=start, end=end)
+                .output(str(output_path), c="copy", avoid_negative_ts="make_zero")
+            )
 
         (
             stream
-            .output(str(output_path), c="copy", avoid_negative_ts="make_zero")
             .overwrite_output()
             .run(quiet=True)
         )
