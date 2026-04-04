@@ -45,6 +45,8 @@ Segments: {segments}
 
 ### Segment info
 - **Segment ID:** {segment_id}
+- **Start Reference:** {start}
+- **End Reference:** {end}
 
 ### Output format
 Return strictly valid JSON as a single-element array. No prose, no markdown fences.

@@ -66,6 +66,8 @@ def _analyze_segment(
         global_summary=global_summary,
         segments=_segment_context(all_segments),
         segment_id=segment.segment_id,
+        start=f"{segment.start:.3f}",
+        end=f"{segment.end:.3f}",
     )
     try:
         raw = backend.analyze_video(clip_path, prompt)
