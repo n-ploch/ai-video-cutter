@@ -113,8 +113,7 @@ def test_movement_stats_returns_camera_movement():
     ts = np.linspace(0, 5, 20)
     cm = movement_stats(sig, ts, segment_id=0, movement_id=0)
     assert isinstance(cm, CameraMovement)
-    assert cm.segment_id == 0
-    assert cm.subsegment_id == 0
+    assert cm.movement_id == 0
     assert np.isfinite(cm.pan_entry_vel)
     assert np.isfinite(cm.pan_exit_vel)
     assert np.isfinite(cm.pan_mean_abs_deriv)
@@ -129,7 +128,7 @@ def test_movement_stats_entry_exit_velocity_5pct():
     ramp = np.linspace(0, 1, 50)
     sig[50:, 0] = ramp  # pan ramps up in second half
     ts = np.linspace(0, 10, n)
-    cm = movement_stats(sig, ts, segment_id=0, subsegment_id=0)
+    cm = movement_stats(sig, ts, segment_id=0, movement_id=0)
     # With 5% of 100 = 5 frames at exit (ramp end), exit_vel should be > entry_vel
     # pan_exit_vel should reflect the ramp slope
     assert cm.pan_exit_vel >= cm.pan_entry_vel
@@ -138,8 +137,7 @@ def test_movement_stats_entry_exit_velocity_5pct():
 def test_movement_stats_start_end_times():
     sig = np.random.rand(10, 4)
     ts = np.array([1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25])
-    cm = movement_stats(sig, ts, segment_id=1, subsegment_id=2)
+    cm = movement_stats(sig, ts, segment_id=1, movement_id=2)
     assert cm.start_time == pytest.approx(1.0)
     assert cm.end_time == pytest.approx(3.25)
-    assert cm.segment_id == 1
-    assert cm.subsegment_id == 2
+    assert cm.movement_id == 2
