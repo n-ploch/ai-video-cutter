@@ -96,8 +96,8 @@ def detect_movement_boundaries(
 def movement_stats(
     signal_slice: np.ndarray,
     timestamps: np.ndarray,
-    scene_id: int,
-    subsegment_id: int,
+    segment_id: int,
+    movement_id: int,
 ) -> CameraMovement:
     """
     Compute CameraMovement statistics for a single movement segment.
@@ -131,8 +131,8 @@ def movement_stats(
         stats[f"{ch}_std_deriv"] = float(np.std(d1))
 
     return CameraMovement(
-        scene_id=scene_id,
-        subsegment_id=subsegment_id,
+        segment_id=segment_id,
+        movement_id=movement_id,
         start_time=float(timestamps[0]),
         end_time=float(timestamps[-1]),
         **stats,

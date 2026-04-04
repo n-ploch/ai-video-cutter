@@ -18,8 +18,8 @@ class FrameMetrics:
 
 @dataclass
 class CameraMovement:
-    scene_id: int
-    subsegment_id: int
+    segment_id: int
+    movement_id: int
     start_time: float
     end_time: float
     pan_entry_vel: float
@@ -41,7 +41,7 @@ class CameraMovement:
 
 @dataclass
 class Segment:
-    scene_id: int
+    segment_id: int
     start_frame: int
     end_frame: int
     start_time: float

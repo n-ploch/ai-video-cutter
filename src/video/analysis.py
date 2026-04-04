@@ -39,7 +39,7 @@ def build_segments(
     ends = scene_boundaries
 
     segments: list[Segment] = []
-    for scene_idx, (s, e) in enumerate(zip(starts, ends)):
+    for segment_idx, (s, e) in enumerate(zip(starts, ends)):
         scene_ts = timestamps[s:e]
         scene_signal = signal[s:e]
 
@@ -55,11 +55,11 @@ def build_segments(
             if len(sub_ts) < 2:
                 continue
             camera_movements.append(
-                movement_stats(scene_signal[ms:me], sub_ts, scene_id=scene_idx, subsegment_id=sub_idx)
+                movement_stats(scene_signal[ms:me], sub_ts, segment_id=segment_idx, movement_id=sub_idx)
             )
 
         segments.append(Segment(
-            scene_id=scene_idx,
+            segment_id=segment_idx,
             start_frame=s,
             end_frame=e - 1,
             start_time=float(scene_ts[0]),
