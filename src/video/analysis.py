@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-from pathlib import Path
-
 import numpy as np
 
-from core.schemas.segment import Segment
+from core.schemas.segment import CameraMovement, SegmentBase, make_segment_id
 from video.segmentation import (
     detect_movement_boundaries,
     detect_scene_boundaries,
@@ -18,18 +15,19 @@ def build_segments(
     timestamps: np.ndarray,
     fd_penalty: float = 3.0,
     subseg_penalty: float = 2.0,
-) -> list[Segment]:
-    """
-    Detect scene and camera-movement boundaries, return list of Segment objects.
+    source_video: str = "",
+    video_file: str = "",
+) -> list[SegmentBase]:
+    """Detect scene and camera-movement boundaries, return list of SegmentBase.
 
     Parameters
     ----------
-    signal     : shape (T, C) — raw or preprocessed, caller's choice.
-                 The same signal is used for both the l2 scene pass and the
-                 l1 per-scene movement pass.
-    timestamps : shape (T,) aligned with signal rows.
-    fd_penalty : Pelt l2 penalty for coarse scene boundaries.
+    signal       : shape (T, C) — raw or preprocessed, caller's choice.
+    timestamps   : shape (T,) aligned with signal rows.
+    fd_penalty   : Pelt l2 penalty for coarse scene boundaries.
     subseg_penalty : Pelt l1 penalty for movement boundaries within each scene.
+    source_video : content-hash of the source video file.
+    video_file   : original filename (e.g. "DJI_0135.MP4").
     """
     if len(signal) < 2:
         return []
@@ -38,7 +36,7 @@ def build_segments(
     starts = [0] + scene_boundaries[:-1]
     ends = scene_boundaries
 
-    segments: list[Segment] = []
+    segments: list[SegmentBase] = []
     for segment_idx, (s, e) in enumerate(zip(starts, ends)):
         scene_ts = timestamps[s:e]
         scene_signal = signal[s:e]
@@ -49,23 +47,25 @@ def build_segments(
         move_boundaries = detect_movement_boundaries(scene_signal, penalty=subseg_penalty)
         move_starts = [0] + move_boundaries[:-1]
 
-        camera_movements = []
+        movements: list[CameraMovement] = []
         for sub_idx, (ms, me) in enumerate(zip(move_starts, move_boundaries)):
             sub_ts = scene_ts[ms:me]
             if len(sub_ts) < 2:
                 continue
-            camera_movements.append(
-                movement_stats(scene_signal[ms:me], sub_ts, segment_id=segment_idx, movement_id=sub_idx)
+            movements.append(
+                movement_stats(
+                    scene_signal[ms:me], sub_ts,
+                    segment_id=segment_idx, movement_id=sub_idx,
+                )
             )
 
-        segments.append(Segment(
-            segment_id=segment_idx,
-            start_frame=s,
-            end_frame=e - 1,
-            start_time=float(scene_ts[0]),
-            end_time=float(scene_ts[-1]),
-            keyframe_indices=[s + len(scene_ts) // 2],
-            camera_movements=camera_movements,
+        segments.append(SegmentBase(
+            segment_id=make_segment_id(source_video, segment_idx),
+            video_file=video_file,
+            source_video=source_video,
+            start=float(scene_ts[0]),
+            end=float(scene_ts[-1]),
+            camera_movements=movements,
         ))
 
     return segments
@@ -73,8 +73,13 @@ def build_segments(
 
 def save_segments(
     storage,
-    project_id: str,
-    segments: list[Segment],
-) -> Path:
-    """Persist segments to {project_id}/analysis/segments.json."""
-    return storage.save_json(project_id, "segments", [asdict(seg) for seg in segments])
+    project_name: str,
+    video_hash: str,
+    segments: list[SegmentBase],
+) -> None:
+    """Persist segments to ``videos/{video_hash}/segments/segments.json``."""
+    storage.save_json(
+        project_name,
+        f"videos/{video_hash}/segments/segments.json",
+        segments,
+    )

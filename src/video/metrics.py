@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-from pathlib import Path
-
-from core.schemas.segment import FrameMetrics
+from core.schemas.video import FrameMetrics
 from video.segmentation import SIGNAL_COLS
 
 
@@ -14,27 +11,25 @@ def compute_frame_metrics(
     coherence: float,
     decomp: dict | None,
 ) -> FrameMetrics:
-    """
-    Build a FrameMetrics from per-frame optical flow outputs.
+    """Build a FrameMetrics from per-frame optical flow outputs.
 
-    decomp is the dict returned by decompose_flow; pass None when RANSAC failed.
+    All per-frame values are stored in the ``metrics`` dict so the schema
+    stays flexible. ``decomp`` is the dict returned by decompose_flow; pass
+    None when RANSAC failed.
     """
-    return FrameMetrics(
-        frame_idx=frame_idx,
-        timestamp=timestamp,
-        flow_magnitude=mag,
-        flow_coherence=coherence,
-        pan=decomp["pan"] if decomp else None,
-        tilt=decomp["tilt"] if decomp else None,
-        roll=decomp["roll"] if decomp else None,
-        zoom=decomp["zoom"] if decomp else None,
-        scene_activity=decomp["scene_activity"] if decomp else None,
-    )
+    metrics: dict = {
+        "flow_magnitude": mag,
+        "flow_coherence": coherence,
+    }
+    if decomp is not None:
+        for key in ("pan", "tilt", "roll", "zoom", "scene_activity"):
+            metrics[key] = decomp.get(key)
+
+    return FrameMetrics(frame_index=frame_idx, timestamp=timestamp, metrics=metrics)
 
 
 def signal_row(timestamp: float, frame_idx: int, decomp: dict) -> dict:
-    """
-    Extract the SIGNAL_COLS dict from a successful RANSAC decomposition.
+    """Extract the SIGNAL_COLS dict from a successful RANSAC decomposition.
 
     Returns a dict with keys: timestamp, frame_idx, pan, tilt, zoom, camera_magnitude.
     Only call this when decomp is not None.
@@ -48,8 +43,8 @@ def signal_row(timestamp: float, frame_idx: int, decomp: dict) -> dict:
 
 def save_frame_metrics(
     storage,
-    project_id: str,
+    project_name: str,
     metrics: list[FrameMetrics],
-) -> Path:
-    """Persist frame metrics to {project_id}/analysis/frame_metrics.json."""
-    return storage.save_json(project_id, "frame_metrics", [asdict(m) for m in metrics])
+) -> None:
+    """Persist frame metrics to ``analysis/frame_metrics.json``."""
+    storage.save_json(project_name, "analysis/frame_metrics.json", metrics)
