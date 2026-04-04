@@ -43,19 +43,22 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import cv2
 import numpy as np
 
-from core.schemas.segment import FrameMetrics, Segment
-from core.schemas.video import ProcessingConfig, SegmentationConfig
+from core.schemas.segment import SegmentBase
+from core.schemas.video import FrameMetrics, ProcessingConfig, SegmentationConfig
 from video.analysis import build_segments, save_segments
 from video.downsample import downsample_video
 from video.homography import decompose_flow
 from video.metrics import compute_frame_metrics, save_frame_metrics, signal_row
 from video.optical_flow import compute_flow, flow_statistics, resize_for_flow
 from video.segmentation import preprocess_signal, SIGNAL_COLS
+
+if TYPE_CHECKING:
+    from core.config import Settings
 
 log = logging.getLogger(__name__)
 
@@ -92,10 +95,11 @@ class PipelineContext:
     preprocessed_signal: np.ndarray | None = None
 
     # Set by SegmentScenesStep
-    segments: list[Segment] = field(default_factory=list)
+    segments: list[SegmentBase] = field(default_factory=list)
 
     # Set by PersistStep
-    project_id: str | None = None
+    project_id: str | None = None   # project name used as storage key
+    video_hash: str | None = None   # content-hash of video_path
 
 
 # ── Abstract base ─────────────────────────────────────────────────────────────
@@ -308,6 +312,8 @@ class SegmentScenesStep(PipelineStep):
             ctx.timestamps,
             fd_penalty=self.seg_config.fd_penalty,
             subseg_penalty=self.seg_config.subseg_penalty,
+            source_video=ctx.video_hash or "",
+            video_file=ctx.video_path.name,
         )
         log.info(f"SegmentScenesStep ({self.signal_source}) → {len(ctx.segments)} segments")
         return ctx
@@ -315,15 +321,21 @@ class SegmentScenesStep(PipelineStep):
 
 class PersistStep(PipelineStep):
     """
-    Save frame_metrics and segments to project storage under analysis/.
+    Save frame_metrics and segments to project storage.
 
-    Creates a new project if ctx.project_id is None.
-    Writes: ctx.project_id.
+    Creates the project if ctx.project_id is None.
+    Writes: ctx.project_id, ctx.video_hash.
     """
 
-    def __init__(self, storage, project_name: str | None = None):
+    def __init__(
+        self,
+        storage,
+        project_name: str | None = None,
+        config: Settings | None = None,
+    ):
         self.storage = storage
         self.project_name = project_name
+        self.config = config
 
     def check_inputs(self, ctx: PipelineContext) -> None:
         if not ctx.frame_metrics and not ctx.segments:
@@ -333,23 +345,40 @@ class PersistStep(PipelineStep):
 
     def run(self, ctx: PipelineContext) -> PipelineContext:
         from core.project import ProjectStatus
+        from core.storage import hash_video_file
 
         name = self.project_name or ctx.project_name or ctx.video_path.stem
 
         if ctx.project_id is None:
-            project = self.storage.create_project(name, [ctx.video_path])
-            ctx.project_id = project.id
+            project_dir = self.storage.get_project_path(name)
+            if (project_dir / "project.json").exists():
+                # Existing project — load it and add the video to the manifest.
+                project = self.storage.get_project(name)
+            else:
+                # Brand-new project — create folder structure.
+                project = self.storage.create_project(name, [ctx.video_path])
+            ctx.project_id = name
         else:
             project = self.storage.get_project(ctx.project_id)
 
+        # Hash the video and register it in the manifest (idempotent).
+        video_hash = hash_video_file(ctx.video_path)
+        ctx.video_hash = video_hash
+        self.storage.add_video(name, ctx.video_path)
+
         if ctx.frame_metrics:
-            save_frame_metrics(self.storage, ctx.project_id, ctx.frame_metrics)
+            save_frame_metrics(self.storage, name, ctx.frame_metrics)
+
         if ctx.segments:
-            save_segments(self.storage, ctx.project_id, ctx.segments)
+            save_segments(self.storage, name, video_hash, ctx.segments)
+
+        if self.config is not None:
+            for step in ("optical_flow", "segmented"):
+                self.storage.mark_step_complete(name, video_hash, step, self.config)
 
         project.status = ProjectStatus.ready
         self.storage.save_project(project)
-        log.info(f"PersistStep → project {ctx.project_id}")
+        log.info(f"PersistStep → project {name} (video {video_hash})")
         return ctx
 
 
@@ -393,11 +422,13 @@ def default_pipeline(
     proc_config: ProcessingConfig | None = None,
     seg_config: SegmentationConfig | None = None,
     storage=None,
+    config: Settings | None = None,
 ) -> Pipeline:
     """
     Standard pipeline: optical flow → preprocess → segment → (persist).
 
     Passing storage=None returns a pipeline that operates purely in memory.
+    ``config`` is forwarded to PersistStep for manifest step-tracking.
     """
     pc = proc_config or ProcessingConfig()
     sc = seg_config or SegmentationConfig()
@@ -408,6 +439,6 @@ def default_pipeline(
         SegmentScenesStep(sc),
     ]
     if storage is not None:
-        steps.append(PersistStep(storage))
+        steps.append(PersistStep(storage, config=config))
 
     return Pipeline(steps)
