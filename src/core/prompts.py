@@ -184,6 +184,39 @@ Return strictly valid JSON. No markdown fences, no prose outside the object.
 }}
 """
 
+STORYBOARD_JUDGE_PROMPT = """\
+You are a senior film editor reviewing a storyboard for quality and narrative coherence.
+
+### Original Story
+{story}
+
+### Storyboard Scenes
+{scenes}
+
+### Instructions
+Evaluate the storyboard against these criteria:
+- **Story arc coverage**: Do the scenes collectively cover the beginning, middle, and end of the story?
+- **Scene specificity**: Are scene descriptions specific enough to retrieve matching video segments?
+- **Cinematographic usefulness**: Are descriptions grounded in visual language (framing, action, environment)?
+- **Narrative continuity**: Does scene order follow a logical progression?
+
+Scoring guide:
+- 0.9–1.0: Publish-ready; all scenes vivid and story fully captured
+- 0.7–0.89: Minor gaps; targeted revisions to specific scenes will fix it
+- 0.5–0.69: Significant vagueness or arc gaps; full scene revision needed
+- Below 0.5: Story–scene alignment broken; restart brainstorming
+
+When `revision_count` is high and score is below threshold, use `escalate` to restart from story.
+
+Return strictly valid JSON. No markdown fences, no prose outside the object.
+
+{{
+  "score": <float 0.0–1.0>,
+  "feedback": "<specific, actionable feedback for the director>",
+  "decision": "<approve|revise|escalate>"
+}}
+"""
+
 STORYBOARD_PROMPT = """
 You are a professional movie director. \
 You will receive a list of narration segments from your screenwriter and your task is to \
