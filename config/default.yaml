@@ -26,8 +26,45 @@ vlm:
   request_delay_s: 2.0
 
 storyboard:
-  model: claude-opus-4-6
+  max_revisions: 2
   review_threshold: 0.7
+  context_threshold: 0.5
+  human_in_the_loop: false
+  story_writer:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.7
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  story_judge:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.1
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  narrator:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.3
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  director:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.5
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  judge:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.1
+    base_url: null
+    api_key: null
+    extra_headers: {}
 
 editor:
   model: claude-opus-4-6

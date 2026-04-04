@@ -184,6 +184,87 @@ Return strictly valid JSON. No markdown fences, no prose outside the object.
 }}
 """
 
+STORY_JUDGE_PROMPT = """\
+You are a senior story editor reviewing a creative story written for a video edit.
+
+### User Brief
+{user_brief}
+
+### Available Video Descriptions
+{video_descriptions}
+
+### Story Under Review
+{story}
+
+### Instructions
+Score the story on three independent dimensions, each from 0.0 to 1.0:
+
+**narrative_quality** — Internal quality of the story as prose:
+- Coherent beginning, middle, and end
+- Vivid, immersive language with emotional depth
+- Consistent tone and pacing
+- 1.0 = publish-ready; 0.0 = incoherent or generic
+
+**brief_adherence** — How faithfully the story follows the user's creative brief:
+- Captures the intent, theme, and any specific requirements stated
+- 1.0 = perfectly aligned; 0.0 = ignores the brief entirely
+
+**context_adherence** — How grounded the story is in the actual video content:
+- Characters, settings, actions, and atmosphere must be traceable to segment descriptions
+- Invented facts that contradict the video descriptions lower this score
+- 1.0 = every story element is supported by available footage; 0.0 = entirely fabricated
+
+The **total_score** is the arithmetic mean of the three dimensions.
+
+⚠️ If `context_adherence` is below 0.5, the decision MUST be `revise`, regardless of total score.
+
+Provide specific, actionable feedback the story writer can act on immediately.
+
+Return strictly valid JSON. No markdown fences, no prose outside the object.
+
+{{
+  "narrative_quality": <float 0.0–1.0>,
+  "brief_adherence": <float 0.0–1.0>,
+  "context_adherence": <float 0.0–1.0>,
+  "total_score": <float 0.0–1.0>,
+  "feedback": "<specific, actionable feedback>",
+  "decision": "<approve|revise>"
+}}
+"""
+
+STORYBOARD_JUDGE_PROMPT = """\
+You are a senior film editor reviewing a storyboard for quality and narrative coherence.
+
+### Original Story
+{story}
+
+### Storyboard Scenes
+{scenes}
+
+### Instructions
+Evaluate the storyboard against these criteria:
+- **Story arc coverage**: Do the scenes collectively cover the beginning, middle, and end of the story?
+- **Scene specificity**: Are scene descriptions specific enough to retrieve matching video segments?
+- **Cinematographic usefulness**: Are descriptions grounded in visual language (framing, action, environment)?
+- **Narrative continuity**: Does scene order follow a logical progression?
+
+Scoring guide:
+- 0.9–1.0: Publish-ready; all scenes vivid and story fully captured
+- 0.7–0.89: Minor gaps; targeted revisions to specific scenes will fix it
+- 0.5–0.69: Significant vagueness or arc gaps; full scene revision needed
+- Below 0.5: Story–scene alignment broken; restart brainstorming
+
+When `revision_count` is high and score is below threshold, use `escalate` to restart from story.
+
+Return strictly valid JSON. No markdown fences, no prose outside the object.
+
+{{
+  "score": <float 0.0–1.0>,
+  "feedback": "<specific, actionable feedback for the director>",
+  "decision": "<approve|revise|escalate>"
+}}
+"""
+
 STORYBOARD_PROMPT = """
 You are a professional movie director. \
 You will receive a list of narration segments from your screenwriter and your task is to \

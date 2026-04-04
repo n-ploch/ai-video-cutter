@@ -6,10 +6,16 @@ from pathlib import Path
 
 import pytest
 
+from pydantic import BaseModel
+
 from core.config import Settings
 from core.project import Project, ProjectStatus
 from core.schemas.video import ProcessingConfig
 from core.storage import ProjectStorage, hash_video_file
+
+
+class _AnyModel(BaseModel):
+    pass
 
 REPO_ROOT = Path(__file__).parents[1]
 DEFAULT_YAML = REPO_ROOT / "config" / "default.yaml"
@@ -206,16 +212,14 @@ def test_save_json_nested_path(storage, fixture_video):
 
 def test_save_versioned_first_is_v1(storage, fixture_video):
     storage.create_project("myproject", [fixture_video])
-    from core.schemas.storyboard import Storyboard
-    v = storage.save_versioned("myproject", "storyboard", Storyboard())
+    v = storage.save_versioned("myproject", "storyboard", _AnyModel())
     assert v == 1
     assert (storage.get_project_path("myproject") / "storyboard" / "v1.json").exists()
 
 
 def test_save_versioned_increments(storage, fixture_video):
     storage.create_project("myproject", [fixture_video])
-    from core.schemas.storyboard import Storyboard
-    sb = Storyboard()
+    sb = _AnyModel()
     v1 = storage.save_versioned("myproject", "storyboard", sb)
     v2 = storage.save_versioned("myproject", "storyboard", sb)
     v3 = storage.save_versioned("myproject", "storyboard", sb)
@@ -226,9 +230,8 @@ def test_save_versioned_increments(storage, fixture_video):
 
 def test_save_versioned_latest_symlink(storage, fixture_video):
     storage.create_project("myproject", [fixture_video])
-    from core.schemas.storyboard import Storyboard
-    storage.save_versioned("myproject", "storyboard", Storyboard())
-    storage.save_versioned("myproject", "storyboard", Storyboard())
+    storage.save_versioned("myproject", "storyboard", _AnyModel())
+    storage.save_versioned("myproject", "storyboard", _AnyModel())
     symlink = storage.get_project_path("myproject") / "storyboard" / "latest.json"
     assert symlink.is_symlink()
     assert symlink.resolve().name == "v2.json"
