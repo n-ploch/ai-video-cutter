@@ -1,0 +1,30 @@
+video:
+  target_fps: 4.0
+  target_width: 640
+  output_format: mp4
+  hwaccel: null
+  optical_flow:
+    pyr_scale: 0.5
+    levels: 3
+    winsize: 15
+    iterations: 3
+    poly_n: 5
+    poly_sigma: 1.2
+  segmentation:
+    fd_penalty: 3.0
+    subseg_penalty: 2.0
+    savgol_window: 11
+    savgol_poly: 2
+
+vlm:
+  provider: anthropic
+  model: claude-opus-4-6
+  temperature: 0.3
+
+storyboard:
+  model: claude-opus-4-6
+  review_threshold: 0.7
+
+editor:
+  model: claude-opus-4-6
+  similarity_threshold: 0.8
