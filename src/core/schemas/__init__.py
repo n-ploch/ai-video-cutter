@@ -13,7 +13,7 @@ from .segment import (
 )
 from .video import VideoFile, FrameMetrics, ProcessingConfig, SegmentationConfig
 from .video_description import VideoDescription, VideoVlm
-from .storyboard import StoryboardOutput, StoryboardScene, NarrationBeat, JudgeResult
+from .storyboard import StoryboardOutput, StoryboardScene, NarrationBeat, JudgeResult, StoryJudgeResult
 from .timeline import Timeline, TimelineEntry, EditDecision
 
 __all__ = [
@@ -41,6 +41,7 @@ __all__ = [
     "StoryboardOutput",
     "StoryboardScene",
     "NarrationBeat",
+    "StoryJudgeResult",
     "JudgeResult",
     # timeline
     "Timeline",
