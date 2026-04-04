@@ -16,8 +16,9 @@ DEFAULT_YAML = REPO_ROOT / "config" / "default.yaml"
 
 def test_load_default_config():
     settings = Settings.load(DEFAULT_YAML)
-    assert isinstance(settings.video.target_fps, float)
-    assert isinstance(settings.video.target_width, int)
+    assert settings.video.downsample.target_fps is None  # default is native fps
+    assert isinstance(settings.video.downsample.target_width, int)
+    assert settings.video.optical_flow.target_fps == 4.0
     assert isinstance(settings.vlm.model, str)
     assert isinstance(settings.storyboard.review_threshold, float)
     assert isinstance(settings.editor.similarity_threshold, float)
@@ -25,19 +26,19 @@ def test_load_default_config():
 
 def test_load_custom_yaml(tmp_path):
     cfg = tmp_path / "custom.yaml"
-    cfg.write_text(yaml.dump({"video": {"target_fps": 2.0, "target_width": 320}}))
+    cfg.write_text(yaml.dump({"video": {"downsample": {"target_fps": 2.0, "target_width": 320}}}))
     settings = Settings.load(cfg)
-    assert settings.video.target_fps == 2.0
-    assert settings.video.target_width == 320
+    assert settings.video.downsample.target_fps == 2.0
+    assert settings.video.downsample.target_width == 320
     # Non-specified keys fall back to defaults.
-    assert settings.vlm.provider == "anthropic"
+    assert settings.vlm.provider == "gemini"
 
 
 def test_load_empty_yaml_uses_defaults(tmp_path):
     cfg = tmp_path / "empty.yaml"
     cfg.write_text("")
     settings = Settings.load(cfg)
-    assert settings.video.target_fps == 4.0
+    assert settings.video.downsample.target_fps is None  # default is native fps
 
 
 # ── config_hash ───────────────────────────────────────────────────────────────
@@ -56,13 +57,15 @@ def test_config_hash_stable_for_same_config():
 
 def test_config_hash_changes_when_target_fps_changes():
     s1 = Settings.load(DEFAULT_YAML)
-    s2 = s1.model_copy(update={"video": s1.video.model_copy(update={"target_fps": 1.0})})
+    new_ds = s1.video.downsample.model_copy(update={"target_fps": 1.0})
+    s2 = s1.model_copy(update={"video": s1.video.model_copy(update={"downsample": new_ds})})
     assert s1.config_hash != s2.config_hash
 
 
 def test_config_hash_changes_when_target_width_changes():
     s1 = Settings.load(DEFAULT_YAML)
-    s2 = s1.model_copy(update={"video": s1.video.model_copy(update={"target_width": 320})})
+    new_ds = s1.video.downsample.model_copy(update={"target_width": 320})
+    s2 = s1.model_copy(update={"video": s1.video.model_copy(update={"downsample": new_ds})})
     assert s1.config_hash != s2.config_hash
 
 

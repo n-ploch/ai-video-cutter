@@ -35,13 +35,14 @@ def downsample_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     hwaccel_args = ["-hwaccel", config.hwaccel] if config.hwaccel else []
+    fps_args = ["-r", str(config.target_fps)] if config.target_fps is not None else []
     cmd = [
         "ffmpeg",
         "-y",                              # overwrite
         *hwaccel_args,
         "-i", str(input_path),
         "-vf", f"scale={config.target_width}:-2",
-        "-r", str(config.target_fps),
+        *fps_args,
         "-an",
         str(output_path),
     ]

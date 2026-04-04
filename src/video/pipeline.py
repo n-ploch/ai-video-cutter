@@ -118,20 +118,89 @@ class PipelineStep(ABC):
 # ── Steps ─────────────────────────────────────────────────────────────────────
 
 class DownsampleStep(PipelineStep):
-    """Downsample the source video before optical flow. Sets ctx.downsampled_path."""
+    """Downsample the source video and persist it to disk. Sets ctx.downsampled_path.
 
-    def __init__(self, proc_config: ProcessingConfig, output_dir: Path):
+    When *storage* and *config* are provided the step is manifest-aware:
+    - The downsampled file is saved to ``videos/{hash}/{stem}_downsampled.{fmt}``
+      inside the project directory.
+    - ``ctx.video_hash`` is populated early (before PersistStep) as a side effect.
+    - If the manifest records a current "downsampled" completion and the file
+      already exists on disk the step is skipped entirely.
+
+    When *storage* is None the file is written to *output_dir*.  If *output_dir*
+    is also None a temporary directory is created automatically (useful for
+    in-memory pipelines and tests).
+    """
+
+    def __init__(
+        self,
+        proc_config: ProcessingConfig,
+        output_dir: Path | None = None,
+        storage=None,
+        config=None,
+    ):
         self.proc_config = proc_config
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir) if output_dir else None
+        self.storage = storage
+        self.config = config
+        self._tmpdir = None  # holds TemporaryDirectory when auto-created
 
     def check_inputs(self, ctx: PipelineContext) -> None:
         if not ctx.video_path.exists():
             raise PipelineStepError(f"video_path does not exist: {ctx.video_path}")
 
     def run(self, ctx: PipelineContext) -> PipelineContext:
-        out = self.output_dir / f"{ctx.video_path.stem}_downsampled.{self.proc_config.output_format}"
-        ctx.downsampled_path = downsample_video(ctx.video_path, out, self.proc_config)
-        log.info(f"DownsampleStep → {ctx.downsampled_path}")
+        import tempfile
+
+        from core.storage import hash_video_file
+
+        stem = ctx.video_path.stem
+        fmt = self.proc_config.output_format
+
+        if self.storage is not None:
+            # ── Storage-backed: manifest-aware, persistent output ─────────────
+            video_hash = hash_video_file(ctx.video_path)
+            ctx.video_hash = video_hash
+
+            name = ctx.project_id or ctx.project_name or stem
+            # Ensure the video is registered (idempotent — creates manifest entry
+            # and videos/{hash}/ folder if absent).
+            self.storage.add_video(name, ctx.video_path)
+
+            out = (
+                self.storage.get_project_path(name)
+                / "videos" / video_hash
+                / f"{stem}_downsampled.{fmt}"
+            )
+
+            if (
+                self.config is not None
+                and out.exists()
+                and self.storage.is_step_current(name, video_hash, "downsampled", self.config)
+            ):
+                ctx.downsampled_path = out
+                log.info("DownsampleStep: skipping (already current) → %s", out)
+                return ctx
+
+            ctx.downsampled_path = downsample_video(ctx.video_path, out, self.proc_config)
+
+            if self.config is not None:
+                self.storage.mark_step_complete(name, video_hash, "downsampled", self.config)
+
+        else:
+            # ── Memory-only: write to output_dir or a managed temp dir ────────
+            if self.output_dir is None:
+                import tempfile as _tf
+                self._tmpdir = _tf.TemporaryDirectory()
+                out_dir = Path(self._tmpdir.name)
+            else:
+                out_dir = self.output_dir
+                out_dir.mkdir(parents=True, exist_ok=True)
+
+            out = out_dir / f"{stem}_downsampled.{fmt}"
+            ctx.downsampled_path = downsample_video(ctx.video_path, out, self.proc_config)
+
+        log.info("DownsampleStep → %s", ctx.downsampled_path)
         return ctx
 
 
@@ -143,8 +212,9 @@ class OpticalFlowStep(PipelineStep):
     Writes: ctx.raw_rows, ctx.frame_metrics, ctx.raw_signal, ctx.timestamps.
     """
 
-    def __init__(self, proc_config: ProcessingConfig):
+    def __init__(self, proc_config: ProcessingConfig, flow_fps: float | None = None):
         self.proc_config = proc_config
+        self.flow_fps = flow_fps
 
     def check_inputs(self, ctx: PipelineContext) -> None:
         source = ctx.downsampled_path or ctx.video_path
@@ -155,13 +225,22 @@ class OpticalFlowStep(PipelineStep):
         import ffmpeg
 
         source = ctx.downsampled_path or ctx.video_path
-        fps = self.proc_config.target_fps
         width = self.proc_config.target_width
         hwaccel = self.proc_config.hwaccel
 
         probe = ffmpeg.probe(str(source))
         vs = next(s for s in probe["streams"] if s["codec_type"] == "video")
         orig_w, orig_h = int(vs["width"]), int(vs["height"])
+
+        # Resolve fps: flow_fps takes priority, then proc_config, then native.
+        if self.flow_fps is not None:
+            fps = self.flow_fps
+        elif self.proc_config.target_fps is not None:
+            fps = self.proc_config.target_fps
+        else:
+            num, den = (int(x) for x in vs["r_frame_rate"].split("/"))
+            fps = num / den
+
         target_h = int(width * orig_h / orig_w)
         if target_h % 2:
             target_h += 1
@@ -366,7 +445,8 @@ class PersistStep(PipelineStep):
             project = self.storage.get_project(ctx.project_id)
 
         # Hash the video and register it in the manifest (idempotent).
-        video_hash = hash_video_file(ctx.video_path)
+        # DownsampleStep may have already computed and set both of these.
+        video_hash = ctx.video_hash or hash_video_file(ctx.video_path)
         ctx.video_hash = video_hash
         self.storage.add_video(name, ctx.video_path)
 
@@ -427,22 +507,46 @@ def default_pipeline(
     seg_config: SegmentationConfig | None = None,
     storage=None,
     config: Settings | None = None,
+    include_vlm: bool = False,
+    flow_fps: float | None = None,
 ) -> Pipeline:
     """
-    Standard pipeline: optical flow → preprocess → segment → (persist).
+    Standard pipeline: downsample → optical flow → preprocess → segment → (persist) → (vlm).
 
-    Passing storage=None returns a pipeline that operates purely in memory.
-    ``config`` is forwarded to PersistStep for manifest step-tracking.
+    DownsampleStep always runs first so that:
+    - OpticalFlowStep reads the smaller downsampled file.
+    - VLMStep and clip extraction have a persistent downsampled file to upload.
+
+    When *storage* is provided DownsampleStep is manifest-aware and skips the
+    ffmpeg call if the "downsampled" step is already current.  Without storage
+    a temporary directory is used (suitable for tests and in-memory pipelines).
+
+    ``config`` is forwarded to DownsampleStep, PersistStep, and VLMStep for
+    manifest step-tracking.
+
+    ``flow_fps`` overrides the optical flow streaming fps. When None, falls back
+    to ``config.video.optical_flow.target_fps`` if config is provided.
     """
     pc = proc_config or ProcessingConfig()
     sc = seg_config or SegmentationConfig()
 
+    resolved_flow_fps = flow_fps
+    if resolved_flow_fps is None and config is not None:
+        resolved_flow_fps = config.video.optical_flow.target_fps
+
     steps: list[PipelineStep] = [
-        OpticalFlowStep(pc),
+        DownsampleStep(pc, storage=storage, config=config),
+        OpticalFlowStep(pc, flow_fps=resolved_flow_fps),
         PreprocessSignalStep(sc),
         SegmentScenesStep(sc),
     ]
     if storage is not None:
         steps.append(PersistStep(storage, config=config))
+
+    if include_vlm:
+        if storage is None or config is None:
+            raise ValueError("include_vlm=True requires both storage and config")
+        from video.vlm import VLMStep
+        steps.append(VLMStep(storage, config))
 
     return Pipeline(steps)
