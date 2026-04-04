@@ -18,7 +18,7 @@ video:
 
 vlm:
   provider: gemini
-  model: gemini-2.0-flash
+  model: gemini-pro-latest
   temperature: 0.3
   gemini_api_key: null
   request_delay_s: 2.0
