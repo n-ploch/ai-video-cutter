@@ -1,11 +1,48 @@
-from .segment import FrameMetrics as FrameMetricsFlow, CameraMovement, Segment
-from .video import VideoFile, FrameMetrics, ProcessingConfig
+from .segment import (
+    CameraMovement,
+    SegmentBase,
+    SegmentDescription,
+    TechnicalSpecs,
+    TechnicalSpecsReasoning,
+    ColorProfile,
+    Highlight,
+    QualityScore,
+    Segment,
+    make_segment_id,
+    build_combined_view,
+)
+from .video import VideoFile, FrameMetrics, ProcessingConfig, SegmentationConfig
+from .video_description import VideoDescription, VideoVlm
+from .storyboard import Storyboard, StoryboardScene, NarrationSegment
+from .timeline import Timeline, TimelineEntry, EditDecision
 
 __all__ = [
-    "FrameMetricsFlow",
+    # segment
     "CameraMovement",
+    "SegmentBase",
+    "SegmentDescription",
+    "TechnicalSpecs",
+    "TechnicalSpecsReasoning",
+    "ColorProfile",
+    "Highlight",
+    "QualityScore",
     "Segment",
+    "make_segment_id",
+    "build_combined_view",
+    # video
     "VideoFile",
     "FrameMetrics",
     "ProcessingConfig",
+    "SegmentationConfig",
+    # video_description
+    "VideoDescription",
+    "VideoVlm",
+    # storyboard
+    "Storyboard",
+    "StoryboardScene",
+    "NarrationSegment",
+    # timeline
+    "Timeline",
+    "TimelineEntry",
+    "EditDecision",
 ]
