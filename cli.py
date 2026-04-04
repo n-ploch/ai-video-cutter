@@ -6,13 +6,15 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from core.config import Settings
+from core.schemas.segment import SegmentBase
 from core.schemas.video import ProcessingConfig, SegmentationConfig
 from core.storage import ProjectStorage, hash_video_file
-from video.pipeline import default_pipeline
+from video.pipeline import PipelineContext, default_pipeline
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -21,6 +23,8 @@ app = typer.Typer(add_completion=False)
 
 _REPO_ROOT = Path(__file__).parent
 _DEFAULT_CONFIG = _REPO_ROOT / "config" / "default.yaml"
+
+load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
 @app.command()
@@ -42,6 +46,7 @@ def process(
     storage_root: Path = typer.Option(Path("local/data/projects"), help="Project storage root"),
     project_name: Optional[str] = typer.Option(None, help="Project name (defaults to video stem)"),
     force: bool = typer.Option(False, "--force", help="Reprocess even if already up to date"),
+    describe: bool = typer.Option(False, "--describe", help="Run VLM scene description after segmentation"),
 ):
     """Run a video through the optical-flow segmentation pipeline."""
     if not video.exists():
@@ -52,13 +57,49 @@ def process(
     storage = ProjectStorage(root=storage_root, default_config=config_path)
     name = project_name or video.stem
     video_hash = hash_video_file(video)
-    if not force and storage.is_step_current(name, video_hash, "segmented", settings):
-        out_dir = storage.get_project_path(name) / "analysis"
-        typer.echo(
-            f"Already processed. Project: {name}  Output: {out_dir}/  "
-            f"(use --force to reprocess)"
-        )
-        raise typer.Exit(0)
+
+    segmented_current = not force and storage.is_step_current(name, video_hash, "segmented", settings)
+
+    if segmented_current:
+        if not describe or storage.is_step_current(name, video_hash, "described", settings):
+            out_dir = storage.get_project_path(name) / "analysis"
+            typer.echo(
+                f"Already processed. Project: {name}  Output: {out_dir}/  "
+                f"(use --force to reprocess)"
+            )
+            raise typer.Exit(0)
+
+        # Segmentation is current but VLM description is missing/stale.
+        # Skip optical flow + segmentation entirely; run only VLMStep.
+        if describe:
+            from video.vlm import VLMStep
+
+            segments = storage.load_json(
+                name,
+                f"videos/{video_hash}/segments/segments.json",
+                schema=SegmentBase,
+            )
+            fmt = settings.video.output_format
+            downsampled = (
+                storage.get_project_path(name)
+                / "videos" / video_hash
+                / f"{video.stem}_downsampled.{fmt}"
+            )
+            ctx = PipelineContext(
+                video_path=video,
+                project_name=name,
+                project_id=name,
+                video_hash=video_hash,
+                segments=segments,
+                downsampled_path=downsampled if downsampled.exists() else None,
+            )
+            VLMStep(storage, settings).run(ctx)
+            typer.echo(
+                f"Done. Project: {name}  "
+                f"Segments described: {len(segments)}  "
+                f"Output: {storage.get_project_path(name) / 'videos' / video_hash}/"
+            )
+            raise typer.Exit(0)
 
     proc_config = ProcessingConfig(
         target_fps=flow_fps if flow_fps is not None else settings.video.target_fps,
@@ -72,7 +113,9 @@ def process(
         savgol_poly=savgol_poly if savgol_poly is not None else settings.video.segmentation.savgol_poly,
     )
 
-    ctx = default_pipeline(proc_config, seg_config, storage, config=settings).run(video, project_name=name)
+    ctx = default_pipeline(
+        proc_config, seg_config, storage, config=settings, include_vlm=describe
+    ).run(video, project_name=name)
 
     out_dir = storage.get_project_path(ctx.project_id) / "analysis"
     typer.echo(
