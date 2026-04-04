@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel
+
+# Default config path, relative to repo root. Callers that need an absolute
+# path should resolve it themselves (e.g. Path(__file__).parents[2] / "config/default.yaml").
+DEFAULT_CONFIG_PATH = Path("config/default.yaml")
+
+
+# ── Sub-models ────────────────────────────────────────────────────────────────
+
+class OpticalFlowConfig(BaseModel):
+    pyr_scale: float = 0.5
+    levels: int = 3
+    winsize: int = 15
+    iterations: int = 3
+    poly_n: int = 5
+    poly_sigma: float = 1.2
+
+
+class VideoSegmentationConfig(BaseModel):
+    fd_penalty: float = 3.0
+    subseg_penalty: float = 2.0
+    savgol_window: int = 11
+    savgol_poly: int = 2
+
+
+class VideoConfig(BaseModel):
+    target_fps: float = 4.0
+    target_width: int = 640
+    output_format: str = "mp4"
+    hwaccel: str | None = None
+    optical_flow: OpticalFlowConfig = OpticalFlowConfig()
+    segmentation: VideoSegmentationConfig = VideoSegmentationConfig()
+
+
+class VlmConfig(BaseModel):
+    provider: str = "anthropic"
+    model: str = "claude-opus-4-6"
+    temperature: float = 0.3
+
+
+class StoryboardConfig(BaseModel):
+    model: str = "claude-opus-4-6"
+    review_threshold: float = 0.7
+
+
+class EditorConfig(BaseModel):
+    model: str = "claude-opus-4-6"
+    similarity_threshold: float = 0.8
+
+
+# ── Top-level Settings ────────────────────────────────────────────────────────
+
+class Settings(BaseModel):
+    project_name: str | None = None  # None in default.yaml; set in per-project config.yaml
+    video: VideoConfig = VideoConfig()
+    vlm: VlmConfig = VlmConfig()
+    storyboard: StoryboardConfig = StoryboardConfig()
+    editor: EditorConfig = EditorConfig()
+
+    @classmethod
+    def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> "Settings":
+        """Load settings from a YAML file. Missing keys fall back to defaults."""
+        raw = yaml.safe_load(Path(path).read_text()) or {}
+        return cls.model_validate(raw)
+
+    @property
+    def config_hash(self) -> str:
+        """SHA-256 of the video config section.
+
+        Used to detect when reprocessing is needed: if config_hash differs
+        from what was recorded at processing time, the step is stale.
+        Only the video section is hashed — VLM/storyboard/editor changes
+        do not invalidate optical-flow or segmentation results.
+        """
+        serialized = json.dumps(
+            self.video.model_dump(mode="json"), sort_keys=True
+        )
+        return hashlib.sha256(serialized.encode()).hexdigest()
