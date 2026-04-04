@@ -29,7 +29,7 @@ def process(
     savgol_window: int = typer.Option(11, help="Savitzky-Golay smoothing window"),
     savgol_poly: int = typer.Option(2, help="Savitzky-Golay polynomial order"),
     hwaccel: Optional[str] = typer.Option(None, help="ffmpeg hwaccel backend (e.g. videotoolbox, cuda)"),
-    storage_root: Path = typer.Option(Path("data/projects"), help="Project storage root"),
+    storage_root: Path = typer.Option(Path("local/data/projects"), help="Project storage root"),
 ):
     """Run a video through the optical-flow segmentation pipeline."""
     if not video.exists():
