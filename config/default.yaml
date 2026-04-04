@@ -1,9 +1,11 @@
 video:
-  target_fps: null
-  target_width: 640
-  output_format: mp4
   hwaccel: null
+  downsample:
+    target_fps: null
+    target_width: 640
+    output_format: mp4
   optical_flow:
+    target_fps: 4.0
     pyr_scale: 0.5
     levels: 3
     winsize: 15

@@ -153,8 +153,9 @@ def test_is_step_current_false_when_config_hash_differs(storage, settings, fixtu
     storage.mark_step_complete("myproject", video_hash, "optical_flow", settings)
 
     # Produce a settings object with different config_hash.
+    new_ds = settings.video.downsample.model_copy(update={"target_fps": 1.0})
     changed = settings.model_copy(
-        update={"video": settings.video.model_copy(update={"target_fps": 1.0})}
+        update={"video": settings.video.model_copy(update={"downsample": new_ds})}
     )
     assert storage.is_step_current("myproject", video_hash, "optical_flow", changed) is False
 

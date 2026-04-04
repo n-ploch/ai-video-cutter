@@ -212,8 +212,9 @@ class OpticalFlowStep(PipelineStep):
     Writes: ctx.raw_rows, ctx.frame_metrics, ctx.raw_signal, ctx.timestamps.
     """
 
-    def __init__(self, proc_config: ProcessingConfig):
+    def __init__(self, proc_config: ProcessingConfig, flow_fps: float | None = None):
         self.proc_config = proc_config
+        self.flow_fps = flow_fps
 
     def check_inputs(self, ctx: PipelineContext) -> None:
         source = ctx.downsampled_path or ctx.video_path
@@ -231,8 +232,10 @@ class OpticalFlowStep(PipelineStep):
         vs = next(s for s in probe["streams"] if s["codec_type"] == "video")
         orig_w, orig_h = int(vs["width"]), int(vs["height"])
 
-        # Resolve fps: use configured value or fall back to the native stream fps.
-        if self.proc_config.target_fps is not None:
+        # Resolve fps: flow_fps takes priority, then proc_config, then native.
+        if self.flow_fps is not None:
+            fps = self.flow_fps
+        elif self.proc_config.target_fps is not None:
             fps = self.proc_config.target_fps
         else:
             num, den = (int(x) for x in vs["r_frame_rate"].split("/"))
@@ -505,6 +508,7 @@ def default_pipeline(
     storage=None,
     config: Settings | None = None,
     include_vlm: bool = False,
+    flow_fps: float | None = None,
 ) -> Pipeline:
     """
     Standard pipeline: downsample → optical flow → preprocess → segment → (persist) → (vlm).
@@ -519,13 +523,20 @@ def default_pipeline(
 
     ``config`` is forwarded to DownsampleStep, PersistStep, and VLMStep for
     manifest step-tracking.
+
+    ``flow_fps`` overrides the optical flow streaming fps. When None, falls back
+    to ``config.video.optical_flow.target_fps`` if config is provided.
     """
     pc = proc_config or ProcessingConfig()
     sc = seg_config or SegmentationConfig()
 
+    resolved_flow_fps = flow_fps
+    if resolved_flow_fps is None and config is not None:
+        resolved_flow_fps = config.video.optical_flow.target_fps
+
     steps: list[PipelineStep] = [
         DownsampleStep(pc, storage=storage, config=config),
-        OpticalFlowStep(pc),
+        OpticalFlowStep(pc, flow_fps=resolved_flow_fps),
         PreprocessSignalStep(sc),
         SegmentScenesStep(sc),
     ]

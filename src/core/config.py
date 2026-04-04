@@ -14,7 +14,14 @@ DEFAULT_CONFIG_PATH = Path("config/default.yaml")
 
 # ── Sub-models ────────────────────────────────────────────────────────────────
 
+class DownsampleConfig(BaseModel):
+    target_fps: float | None = None  # None → preserve native fps
+    target_width: int = 640
+    output_format: str = "mp4"
+
+
 class OpticalFlowConfig(BaseModel):
+    target_fps: float = 4.0          # fps at which frames are streamed for flow computation
     pyr_scale: float = 0.5
     levels: int = 3
     winsize: int = 15
@@ -31,10 +38,8 @@ class VideoSegmentationConfig(BaseModel):
 
 
 class VideoConfig(BaseModel):
-    target_fps: float | None = None  # None → preserve native fps
-    target_width: int = 640
-    output_format: str = "mp4"
     hwaccel: str | None = None
+    downsample: DownsampleConfig = DownsampleConfig()
     optical_flow: OpticalFlowConfig = OpticalFlowConfig()
     segmentation: VideoSegmentationConfig = VideoSegmentationConfig()
 

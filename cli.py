@@ -36,8 +36,9 @@ def process(
         help="Path to YAML config file",
     ),
     # Per-run overrides — defaults shown come from config file at runtime.
-    flow_fps: Optional[float] = typer.Option(None, help="Frames per second for optical flow pass"),
-    target_width: Optional[int] = typer.Option(None, help="Resize width for optical flow frames"),
+    downsample_fps: Optional[float] = typer.Option(None, help="Frames per second for the downsampled file (null = native)"),
+    flow_fps: Optional[float] = typer.Option(None, help="Frames per second for optical flow streaming"),
+    target_width: Optional[int] = typer.Option(None, help="Resize width for downsampling and optical flow frames"),
     fd_penalty: Optional[float] = typer.Option(None, help="Pelt l2 penalty for scene boundaries"),
     subseg_penalty: Optional[float] = typer.Option(None, help="Pelt l1 penalty for movement boundaries"),
     savgol_window: Optional[int] = typer.Option(None, help="Savitzky-Golay smoothing window"),
@@ -79,7 +80,7 @@ def process(
                 f"videos/{video_hash}/segments/segments.json",
                 schema=SegmentBase,
             )
-            fmt = settings.video.output_format
+            fmt = settings.video.downsample.output_format
             downsampled = (
                 storage.get_project_path(name)
                 / "videos" / video_hash
@@ -102,8 +103,8 @@ def process(
             raise typer.Exit(0)
 
     proc_config = ProcessingConfig(
-        target_fps=flow_fps if flow_fps is not None else settings.video.target_fps,
-        target_width=target_width if target_width is not None else settings.video.target_width,
+        target_fps=downsample_fps if downsample_fps is not None else settings.video.downsample.target_fps,
+        target_width=target_width if target_width is not None else settings.video.downsample.target_width,
         hwaccel=hwaccel if hwaccel is not None else settings.video.hwaccel,
     )
     seg_config = SegmentationConfig(
@@ -114,7 +115,8 @@ def process(
     )
 
     ctx = default_pipeline(
-        proc_config, seg_config, storage, config=settings, include_vlm=describe
+        proc_config, seg_config, storage, config=settings, include_vlm=describe,
+        flow_fps=flow_fps,
     ).run(video, project_name=name)
 
     out_dir = storage.get_project_path(ctx.project_id) / "analysis"
