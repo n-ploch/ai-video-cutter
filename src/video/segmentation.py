@@ -131,7 +131,6 @@ def movement_stats(
         stats[f"{ch}_std_deriv"] = float(np.std(d1))
 
     return CameraMovement(
-        segment_id=segment_id,
         movement_id=movement_id,
         start_time=float(timestamps[0]),
         end_time=float(timestamps[-1]),
