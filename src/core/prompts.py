@@ -415,6 +415,7 @@ STORYBOARD_PROMPT = """
 You are a professional movie director. \
 You will receive a list of narration segments from your screenwriter and your task is to \
 create a storyboard out of it. For this, create detailed scene descriptions from these narration segments. \
+You may collapse narration segments into one scene if it fits the story arc and the available footage. 
 This storyboard will be used to create the editing script, which will \
 retrieve video segments and arrange them semantically to create an edit timeline \
 matching the storyboard.
@@ -433,6 +434,7 @@ to align your scene descriptions with the available content.
 ### Instructions
 - In the scene descriptions, use descriptive language useful for matching with video descriptions semantically.
 - Preserve the tone and arc of the original story.
+- You may collapse several narration segments into one scene if fitting the story and available footage.
 - Number scenes sequentially starting from 1.
 
 Return strictly valid JSON. No markdown fences, no prose outside the object.
@@ -441,7 +443,7 @@ Return strictly valid JSON. No markdown fences, no prose outside the object.
   "scenes": [
 {{
       "id": 1,
-      "narration_segment": "<Segment of the original story serving as content anchor>"
+      "narration_segment": "<Segment(s) of the original story serving as content anchor>"
       "scene_description": "<narration text for this segment>"
       "reasoning": "<short reasoning about the range of the chosen segment and the crafted scene>"
       "keywords": [List of max 7 keywords describing the scene]
