@@ -67,9 +67,11 @@ storyboard:
     extra_headers: {}
 
 editor:
+  skip_stitching: false   # bypass stitch_scenes
+  skip_review: false      # bypass review_timeline
   human_in_the_loop: false
   max_gate2_rounds: 2
-  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  embedding_model: "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
   top_k_candidates: 15
   min_candidates_per_scene: 3
   candidate_alpha: 0.7
