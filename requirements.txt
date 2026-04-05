@@ -13,3 +13,4 @@ protobuf==7.34.0
 matplotlib==3.10.8
 pandas==3.0.1
 umap-learn==0.5.11
+networkx>=3.0
