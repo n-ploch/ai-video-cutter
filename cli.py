@@ -191,5 +191,42 @@ def storyboard(
     )
 
 
+@app.command()
+def edit(
+    project_name: Annotated[str, typer.Argument(help="Name of a project that has a storyboard")],
+    config_path: Path = typer.Option(
+        _DEFAULT_CONFIG,
+        "--config",
+        help="Path to YAML config file",
+    ),
+    storage_root: Path = typer.Option(Path("local/data/projects"), help="Project storage root"),
+):
+    """Run the timeline assembly agent on a project that has a storyboard.
+
+    Reads segment data + storyboard/latest.json, then runs the LangGraph
+    pipeline (embedding index → candidates → assembly → stitching → review)
+    to produce a versioned timeline saved under timeline/latest.json.
+    """
+    from editor.graph import run as run_editor
+
+    settings = Settings.load(config_path)
+    storage = ProjectStorage(root=storage_root, default_config=config_path)
+
+    typer.echo(f"Running timeline assembly agent for project '{project_name}' …")
+    output = run_editor(
+        project_name=project_name,
+        cfg=settings.editor,
+        storage=storage,
+    )
+
+    out_dir = storage.get_project_path(project_name) / "timeline"
+    typer.echo(
+        f"Done.  Scenes: {len(output.scenes)}  "
+        f"Duration: {output.total_duration:.1f}s  "
+        f"Segments: {output.total_segments}  "
+        f"Output: {out_dir}/latest.json"
+    )
+
+
 if __name__ == "__main__":
     app()
