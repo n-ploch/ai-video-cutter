@@ -95,7 +95,7 @@ class StitchDecision(BaseModel):
 # ── Stage 8: Automated Review ─────────────────────────────────────────────────
 
 class SceneReviewNote(BaseModel):
-    scene_id: int
+    scene_id: int | None = None
     issue: str
     severity: Literal["minor", "structural"]
     suggestion: str
