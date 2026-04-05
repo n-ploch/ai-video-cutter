@@ -234,5 +234,85 @@ def edit(
     )
 
 
+@app.command()
+def export(
+    project_name: Annotated[str, typer.Argument(help="Name of a project with a timeline")],
+    timeline_version: Optional[str] = typer.Option(
+        None,
+        "--version", "-v",
+        help="Timeline version to export, e.g. 'v1', 'v2'. Defaults to latest.",
+    ),
+    rate: float = typer.Option(30.0, "--rate", help="Frame rate for the OTIO timeline"),
+    storage_root: Path = typer.Option(Path("local/data/projects"), help="Project storage root"),
+):
+    """Export a project timeline to OpenTimelineIO (.otio).
+
+    Reads timeline/{version}.json and the video manifest, then writes
+    timeline/{version}.otio alongside the JSON file.
+    """
+    import re
+    import opentimelineio as otio
+    from core.schemas.editor import TimelineOutput
+    from editor.tools.otio_export import timeline_to_otio
+
+    storage = ProjectStorage(root=storage_root)
+    project_dir = storage.get_project_path(project_name)
+    timeline_dir = project_dir / "timeline"
+    export_dir = project_dir / "export_timeline"
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve the version from the timeline directory
+    if timeline_version:
+        tag = timeline_version.lstrip("v")
+        json_path = timeline_dir / f"v{tag}.json"
+        otio_stem = f"v{tag}"
+    else:
+        latest = timeline_dir / "latest.json"
+        if not latest.exists():
+            typer.echo(f"Error: no timeline found at {latest}", err=True)
+            raise typer.Exit(1)
+        json_path = latest.resolve()
+        otio_stem = json_path.stem   # e.g. "v3"
+
+    if not json_path.exists():
+        typer.echo(f"Error: timeline not found at {json_path}", err=True)
+        raise typer.Exit(1)
+
+    otio_path = export_dir / f"{otio_stem}.otio"
+
+    # Build source_video hash → original path map from the manifest
+    manifest = storage._load_manifest(project_name)
+    video_paths: dict[str, str] = {
+        h: entry["original_path"]
+        for h, entry in manifest.get("videos", {}).items()
+    }
+
+    timeline: TimelineOutput = storage.load_json(
+        project_name,
+        f"timeline/{json_path.name}",
+        schema=TimelineOutput,
+    )
+
+    otio_timeline = timeline_to_otio(timeline, video_paths, rate=rate)
+    otio.adapters.write_to_file(otio_timeline, str(otio_path))
+
+    # Keep latest.otio pointing at the same version as latest.json
+    latest_json = timeline_dir / "latest.json"
+    if latest_json.exists():
+        latest_version_stem = latest_json.resolve().stem   # e.g. "v3"
+        latest_otio_target = export_dir / f"{latest_version_stem}.otio"
+        if latest_otio_target.exists():
+            latest_otio = export_dir / "latest.otio"
+            if latest_otio.is_symlink() or latest_otio.exists():
+                latest_otio.unlink()
+            latest_otio.symlink_to(latest_otio_target.name)
+
+    typer.echo(
+        f"Exported {json_path.name} → {otio_path.name}  "
+        f"({timeline.total_segments} clips, {timeline.total_duration:.1f}s @ {rate:.0f}fps)  "
+        f"Output: {otio_path}"
+    )
+
+
 if __name__ == "__main__":
     app()
