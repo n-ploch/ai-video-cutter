@@ -325,7 +325,6 @@ Target duration: {target_duration_ideal:.1f}s  (range {target_duration_min:.1f}�
 
 ### Instructions
 Select the chain that best serves the narrative intent of this scene. Consider:
-- **Duration**: prefer chains closest to the ideal duration.
 - **Visual flow**: reward framing progressions (wide → medium → close or reverse).
 - **Pacing variety**: avoid monotonous sequences of all-static or all-motion clips.
 - **Narrative fit**: higher-cost chains may still be acceptable if they tell the \
