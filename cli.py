@@ -209,6 +209,12 @@ def edit(
     """
     from editor.graph import run as run_editor
 
+    # Prefer the project-local config.yaml over the global default
+    project_config = Path(storage_root) / project_name / "config.yaml"
+    if project_config.exists():
+        config_path = project_config
+        log.info("edit: using project config %s", config_path)
+
     settings = Settings.load(config_path)
     storage = ProjectStorage(root=storage_root, default_config=config_path)
 
