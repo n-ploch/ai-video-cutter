@@ -71,11 +71,13 @@ def build_segment_index(segments: list[dict], model_name: str) -> None:
         sid = seg["segment_id"]
         vlm_list = seg.get("vlm", [])
         if vlm_list:
-            desc = vlm_list[0].get("description", "") or ""
+            vlm = vlm_list[0]
+            desc = vlm.get("description", "") or ""
             highlight_texts = " ".join(
-                h.get("description", "") for h in vlm_list[0].get("highlights", [])
+                h.get("description", "") for h in vlm.get("highlights", [])
             )
-            text = (desc + " " + highlight_texts).strip() or sid
+            tags = " ".join(vlm.get("segment_tags", []))
+            text = " ".join(filter(None, [desc, highlight_texts, tags])) or sid
         else:
             text = sid
         texts.append(text)
@@ -106,7 +108,11 @@ def retrieve_candidates(
     """
     from core.schemas.editor import CandidateInfo
 
-    scene_text = (scene.get("scene_description", "") + " " + " ".join(scene.get("keywords", []))).strip()
+    scene_text = " ".join(filter(None, [
+        scene.get("narration_segment", ""),
+        scene.get("scene_description", ""),
+        " ".join(scene.get("keywords", [])),
+    ])).strip()
     query_vec = compute_embeddings([scene_text], cfg.embedding_model)[0]  # shape (D,)
 
     # Cosine similarity (index already L2-normalised, query also normalised above)

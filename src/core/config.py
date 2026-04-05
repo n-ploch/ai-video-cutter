@@ -96,6 +96,9 @@ class EditorConfig(BaseModel):
     w3: float = 0.2     # instability penalty (std_deriv)
     w4: float = 0.1     # monotonicity reward
     w5: float = 0.3     # narrative mismatch penalty
+    # ── optional pipeline steps ───────────────────────────────────────────────
+    skip_stitching: bool = False   # skip stitch_scenes node
+    skip_review: bool = False      # skip review_timeline node
     # ── per-agent LLM configs ─────────────────────────────────────────────────
     narrative_analyst: AgentLLMConfig = AgentLLMConfig(temperature=0.3)
     editorial_selector: AgentLLMConfig = AgentLLMConfig(temperature=0.2)

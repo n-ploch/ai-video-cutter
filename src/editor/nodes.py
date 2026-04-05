@@ -101,7 +101,14 @@ def make_build_index_node(cfg):
     from editor.tools.embedding import build_segment_index
 
     def build_embedding_index_node(state: EditorState) -> dict:
-        log.info("build_embedding_index: encoding %d segments", len(state["segments"]))
+        # Per-video segment counts
+        counts: dict[str, int] = {}
+        for seg in state["segments"]:
+            vf = seg.get("video_file") or seg.get("source_video") or "unknown"
+            counts[vf] = counts.get(vf, 0) + 1
+        for vf, n in sorted(counts.items()):
+            log.info("build_embedding_index: %s → %d segments", vf, n)
+        log.info("build_embedding_index: encoding %d segments total", len(state["segments"]))
         build_segment_index(state["segments"], cfg.embedding_model)
         return {}
 
@@ -139,6 +146,12 @@ def deduplicate_candidates_node(state: EditorState) -> dict:
         for c in candidates:
             seg_to_scenes.setdefault(c["segment_id"], []).append((sid, c["combined_score"]))
 
+    contested = sum(1 for v in seg_to_scenes.values() if len(v) > 1)
+    log.info(
+        "deduplicate: %d unique segments across %d scenes, %d contested",
+        len(seg_to_scenes), len(state["scene_candidates"]), contested,
+    )
+
     # For each segment in multiple pools, keep only the highest-scoring scene
     winner: dict[str, str] = {}
     for seg_id, scene_scores in seg_to_scenes.items():
@@ -148,9 +161,15 @@ def deduplicate_candidates_node(state: EditorState) -> dict:
     # Rebuild pools
     deduped: dict[str, list[dict]] = {sid: [] for sid in state["scene_candidates"]}
     for sid, candidates in state["scene_candidates"].items():
+        before = len(candidates)
         for c in candidates:
             if winner.get(c["segment_id"]) == sid:
                 deduped[sid].append(c)
+        after = len(deduped[sid])
+        log.info(
+            "deduplicate: scene %s — kept %d/%d candidates (%d lost to other scenes)",
+            sid, after, before, before - after,
+        )
 
     # Gap warnings
     gap_warnings: list[str] = []
@@ -185,9 +204,12 @@ def make_assemble_scenes_node(
         chains_per_scene = dict(state.get("chains_per_scene") or {})
         chain_selections = dict(state.get("chain_selections") or {})
 
-        # Determine which scenes to process
+        # Determine which scenes to process.
+        # is_reassembly is True for both the human Gate 2 path (flagged_scene_ids set)
+        # and the automated review loop path (a prior review exists).  This ensures
+        # gate2_round increments on every re-entry so max_gate2_rounds terminates the loop.
         flagged = state.get("flagged_scene_ids") or []
-        is_reassembly = bool(flagged)
+        is_reassembly = bool(flagged) or (state.get("review") is not None)
         scenes_to_process = [
             s for s in state["scenes"]
             if str(s["id"]) in state["deduped_candidates"]
@@ -290,9 +312,11 @@ def make_assemble_scenes_node(
                 0, min(selection.selected_chain_index, len(chains) - 1)
             )
             chain_selections[sid] = selection.model_dump()
+            selected_chain = chains[selection.selected_chain_index]
+            selected_seg_ids = [lnk.segment_id for lnk in selected_chain.links]
             log.info(
-                "assemble_scenes: scene %s — selected chain %d",
-                sid, selection.selected_chain_index,
+                "assemble_scenes: scene %s — selected chain %d, segments: %s",
+                sid, selection.selected_chain_index, selected_seg_ids,
             )
 
         new_gate2_round = (
@@ -307,6 +331,69 @@ def make_assemble_scenes_node(
         }
 
     return assemble_scenes_node
+
+
+# ── Node: fill gaps ───────────────────────────────────────────────────────────
+
+def make_fill_gaps_node(cfg):
+    """For scenes with too few candidates after dedup, pull from unassigned segments."""
+    from editor.tools.embedding import get_index, retrieve_candidates
+
+    def fill_gaps_node(state: EditorState) -> dict:
+        deduped = {sid: list(pool) for sid, pool in state["deduped_candidates"].items()}
+
+        # Collect segments already assigned to any scene
+        assigned_ids: set[str] = {
+            c["segment_id"] for pool in deduped.values() for c in pool
+        }
+
+        gap_scenes = [
+            sid for sid, pool in deduped.items()
+            if len(pool) < state["min_candidates_per_scene"]
+        ]
+        if not gap_scenes:
+            return {}
+
+        matrix, ids = get_index()
+        unassigned_id_set = {
+            s["segment_id"] for s in state["segments"]
+            if s["segment_id"] not in assigned_ids
+        }
+
+        gap_warnings: list[str] = []
+        for sid in gap_scenes:
+            pool = deduped[sid]
+            needed = state["min_candidates_per_scene"] - len(pool)
+            scene = next((s for s in state["scenes"] if str(s["id"]) == sid), None)
+            if scene is None:
+                continue
+
+            # Retrieve from full index, filter to unassigned only
+            extra_candidates = [
+                c for c in retrieve_candidates(scene, state["segments"], matrix, ids, cfg)
+                if c.segment_id in unassigned_id_set
+            ]
+            added = extra_candidates[:needed]
+            for c in added:
+                pool.append(c.model_dump())
+                assigned_ids.add(c.segment_id)
+                unassigned_id_set.discard(c.segment_id)
+
+            log.info(
+                "fill_gaps: scene %s — added %d segment(s) from unassigned pool (pool now %d)",
+                sid, len(added), len(pool),
+            )
+            if len(pool) < state["min_candidates_per_scene"]:
+                msg = (
+                    f"Scene {sid} still has only {len(pool)} candidate(s) after gap fill "
+                    f"(minimum {state['min_candidates_per_scene']})"
+                )
+                log.warning("fill_gaps: %s", msg)
+                gap_warnings.append(msg)
+
+        return {"deduped_candidates": deduped, "gap_warnings": gap_warnings}
+
+    return fill_gaps_node
 
 
 # ── Node: stitch scenes ────────────────────────────────────────────────────────
@@ -452,7 +539,16 @@ def make_review_timeline_node(reviewer_llm: BaseChatModel):
             timeline_summary="\n".join(timeline_lines),
             boundary_summary=boundary_text,
         )
-        review: TimelineReview = structured_reviewer.invoke([HumanMessage(content=prompt)])
+        review: TimelineReview | None = structured_reviewer.invoke([HumanMessage(content=prompt)])
+        if review is None:
+            log.warning("review_timeline: LLM returned None — using fallback approve review")
+            review = TimelineReview(
+                overall_score=0.5,
+                scene_notes=[],
+                has_structural_issues=False,
+                auto_fix_applied=[],
+                decision="approve",
+            )
         log.info(
             "review_timeline: score=%.2f structural_issues=%s decision=%s",
             review.overall_score, review.has_structural_issues, review.decision,
@@ -483,7 +579,14 @@ def make_persist_timeline_node(storage, project_name: str):
             sid = str(scene["id"])
             chain = _get_selected_chain(state, scene["id"])
             if not chain:
-                log.warning("persist: scene %s has no selected chain — skipping", sid)
+                log.warning("persist: scene %s has no selected chain — including as empty", sid)
+                scene_timelines.append(SceneTimeline(
+                    scene_id=scene["id"],
+                    scene_description=scene.get("scene_description", ""),
+                    chain_cost=0.0,
+                    total_duration=0.0,
+                    entries=[],
+                ))
                 continue
 
             entries: list[TimelineSegmentEntry] = []

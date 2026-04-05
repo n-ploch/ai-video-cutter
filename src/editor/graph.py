@@ -13,6 +13,7 @@ from editor.nodes import (
     deduplicate_candidates_node,
     make_assemble_scenes_node,
     make_build_index_node,
+    make_fill_gaps_node,
     make_persist_timeline_node,
     make_retrieve_candidates_node,
     make_review_timeline_node,
@@ -25,6 +26,20 @@ log = logging.getLogger(__name__)
 
 
 # ── Routing ────────────────────────────────────────────────────────────────────
+
+def _route_after_assemble(cfg: EditorConfig):
+    def route(state: EditorState) -> str:
+        if cfg.skip_stitching:
+            return "persist_timeline" if cfg.skip_review else "review_timeline"
+        return "stitch_scenes"
+    return route
+
+
+def _route_after_stitch(cfg: EditorConfig):
+    def route(state: EditorState) -> str:
+        return "persist_timeline" if cfg.skip_review else "review_timeline"
+    return route
+
 
 def _route_review(state: EditorState) -> str:
     review = state.get("review") or {}
@@ -57,6 +72,7 @@ def build_graph(
     graph.add_node("build_embedding_index", make_build_index_node(cfg))
     graph.add_node("retrieve_candidates", make_retrieve_candidates_node(cfg))
     graph.add_node("deduplicate_candidates", deduplicate_candidates_node)
+    graph.add_node("fill_gaps", make_fill_gaps_node(cfg))
     graph.add_node("assemble_scenes", make_assemble_scenes_node(analyst_llm, selector_llm, cfg))
     graph.add_node("stitch_scenes", make_stitch_scenes_node(stitcher_llm, cfg))
     graph.add_node("review_timeline", make_review_timeline_node(reviewer_llm))
@@ -65,9 +81,23 @@ def build_graph(
     graph.add_edge(START, "build_embedding_index")
     graph.add_edge("build_embedding_index", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "deduplicate_candidates")
-    graph.add_edge("deduplicate_candidates", "assemble_scenes")
-    graph.add_edge("assemble_scenes", "stitch_scenes")
-    graph.add_edge("stitch_scenes", "review_timeline")
+    graph.add_edge("deduplicate_candidates", "fill_gaps")
+    graph.add_edge("fill_gaps", "assemble_scenes")
+
+    # Optional stitching / review
+    after_assemble_targets = {"stitch_scenes", "review_timeline", "persist_timeline"}
+    graph.add_conditional_edges(
+        "assemble_scenes",
+        _route_after_assemble(cfg),
+        {t: t for t in after_assemble_targets},
+    )
+    after_stitch_targets = {"review_timeline", "persist_timeline"}
+    graph.add_conditional_edges(
+        "stitch_scenes",
+        _route_after_stitch(cfg),
+        {t: t for t in after_stitch_targets},
+    )
+
     graph.add_conditional_edges(
         "review_timeline",
         _route_review,
