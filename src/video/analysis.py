@@ -17,20 +17,25 @@ def build_segments(
     subseg_penalty: float = 2.0,
     source_video: str = "",
     video_file: str = "",
+    raw_signal: np.ndarray | None = None,
 ) -> list[SegmentBase]:
     """Detect scene and camera-movement boundaries, return list of SegmentBase.
 
     Parameters
     ----------
-    signal       : shape (T, C) — raw or preprocessed, caller's choice.
+    signal       : shape (T, C) — used for boundary detection (preprocessed recommended).
     timestamps   : shape (T,) aligned with signal rows.
     fd_penalty   : Pelt l2 penalty for coarse scene boundaries.
     subseg_penalty : Pelt l1 penalty for movement boundaries within each scene.
     source_video : content-hash of the source video file.
     video_file   : original filename (e.g. "DJI_0135.MP4").
+    raw_signal   : shape (T, C) raw (unnormalized) signal. When provided, movement
+                   stats are computed from these values instead of `signal`.
     """
     if len(signal) < 2:
         return []
+
+    stats_signal = raw_signal if raw_signal is not None else signal
 
     scene_boundaries = detect_scene_boundaries(signal, penalty=fd_penalty)
     starts = [0] + scene_boundaries[:-1]
@@ -40,6 +45,7 @@ def build_segments(
     for segment_idx, (s, e) in enumerate(zip(starts, ends)):
         scene_ts = timestamps[s:e]
         scene_signal = signal[s:e]
+        scene_stats_signal = stats_signal[s:e]
 
         if len(scene_ts) == 0:
             continue
@@ -54,7 +60,7 @@ def build_segments(
                 continue
             movements.append(
                 movement_stats(
-                    scene_signal[ms:me], sub_ts,
+                    scene_stats_signal[ms:me], sub_ts,
                     segment_id=segment_idx, movement_id=sub_idx,
                 )
             )
