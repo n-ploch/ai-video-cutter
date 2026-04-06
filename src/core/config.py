@@ -74,8 +74,36 @@ class StoryboardConfig(BaseModel):
 
 
 class EditorConfig(BaseModel):
+    # ── backward compat ───────────────────────────────────────────────────────
     model: str = "claude-opus-4-6"
     similarity_threshold: float = 0.8
+    # ── human gates ───────────────────────────────────────────────────────────
+    human_in_the_loop: bool = False
+    max_gate2_rounds: int = 2
+    # ── retrieval ─────────────────────────────────────────────────────────────
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    top_k_candidates: int = 15
+    min_candidates_per_scene: int = 3
+    candidate_alpha: float = 0.7    # weight of embedding score vs keyword score
+    # ── chain selection ───────────────────────────────────────────────────────
+    top_k_chains: int = 5
+    duration_tolerance: float = 0.2  # ±fraction of ideal for chain duration filter
+    # ── stitching ─────────────────────────────────────────────────────────────
+    stitching_cost_threshold: float = 0.6   # flag boundary if kinematic cost > this
+    # ── cost function weights ─────────────────────────────────────────────────
+    w1: float = 0.4     # kinematic direction (cosine)
+    w2: float = 0.3     # kinematic magnitude ratio
+    w3: float = 0.2     # instability penalty (std_deriv)
+    w4: float = 0.1     # monotonicity reward
+    w5: float = 0.3     # narrative mismatch penalty
+    # ── optional pipeline steps ───────────────────────────────────────────────
+    skip_stitching: bool = False   # skip stitch_scenes node
+    skip_review: bool = False      # skip review_timeline node
+    # ── per-agent LLM configs ─────────────────────────────────────────────────
+    narrative_analyst: AgentLLMConfig = AgentLLMConfig(temperature=0.3)
+    editorial_selector: AgentLLMConfig = AgentLLMConfig(temperature=0.2)
+    stitching_agent: AgentLLMConfig = AgentLLMConfig(temperature=0.2)
+    reviewer: AgentLLMConfig = AgentLLMConfig(temperature=0.1)
 
 
 # ── Top-level Settings ────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ dependencies = [
     "langchain-openai>=0.2",
     "langchain-google-genai>=2.0",
     "langchain-mistralai>=0.2",
+    "networkx>=3.0",
 ]
 
 [project.scripts]

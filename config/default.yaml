@@ -67,5 +67,47 @@ storyboard:
     extra_headers: {}
 
 editor:
-  model: claude-opus-4-6
-  similarity_threshold: 0.8
+  skip_stitching: false   # bypass stitch_scenes
+  skip_review: false      # bypass review_timeline
+  human_in_the_loop: false
+  max_gate2_rounds: 2
+  embedding_model: "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
+  top_k_candidates: 15
+  min_candidates_per_scene: 3
+  candidate_alpha: 0.7
+  top_k_chains: 5
+  duration_tolerance: 0.2
+  stitching_cost_threshold: 0.6
+  w1: 0.4
+  w2: 0.3
+  w3: 0.2
+  w4: 0.1
+  w5: 0.3
+  narrative_analyst:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.3
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  editorial_selector:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.2
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  stitching_agent:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.2
+    base_url: null
+    api_key: null
+    extra_headers: {}
+  reviewer:
+    provider: mistral
+    model: mistral-large-latest
+    temperature: 0.1
+    base_url: null
+    api_key: null
+    extra_headers: {}

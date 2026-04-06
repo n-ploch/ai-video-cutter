@@ -390,6 +390,8 @@ class SegmentScenesStep(PipelineStep):
             if self.signal_source == "preprocessed"
             else ctx.raw_signal
         )
+        # Always pass raw_signal so movement stats are derived from raw values,
+        # regardless of whether boundary detection uses preprocessed signal.
         ctx.segments = build_segments(
             signal,
             ctx.timestamps,
@@ -397,6 +399,7 @@ class SegmentScenesStep(PipelineStep):
             subseg_penalty=self.seg_config.subseg_penalty,
             source_video=ctx.video_hash or "",
             video_file=ctx.video_path.name,
+            raw_signal=ctx.raw_signal,
         )
         log.info(f"SegmentScenesStep ({self.signal_source}) → {len(ctx.segments)} segments")
         return ctx

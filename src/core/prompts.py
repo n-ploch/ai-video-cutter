@@ -265,10 +265,156 @@ Return strictly valid JSON. No markdown fences, no prose outside the object.
 }}
 """
 
+# ── Timeline assembly (editor) prompts ────────────────────────────────────────
+
+NARRATIVE_ANALYST_PROMPT = """\
+You are a senior film editor performing narrative analysis on a single scene. \
+Your task is to define an assembly structure for this scene and evaluate which \
+video segments are narratively suitable.
+
+### Scene
+Scene ID: {scene_id}
+Narration: {narration_text}
+Scene description: {scene_description}
+Keywords: {keywords}
+
+### Available candidate segments
+{candidate_list}
+(Format: segment_id | duration_s | quality | description)
+
+### Instructions
+
+**1. Target duration.**
+Estimate a realistic duration range (min, max, ideal) for this scene in seconds. \
+Use ~3 seconds per sentence of narration text as a baseline; adjust for scene \
+type (action scenes: shorter cuts; contemplative scenes: longer holds). \
+The ideal should fall within [min, max].
+
+**2. Narrative buckets.**
+Define 2–5 ordered narrative buckets appropriate for this scene \
+(e.g. ["establishing", "detail", "reaction"] for a calm scene, \
+or ["hook", "build_up", "climax", "resolution"] for an action scene). \
+Each bucket needs a description and a suggested duration range in seconds. \
+Mark buckets as required=true unless they are truly optional inserts.
+
+**3. Candidate scoring and assignment.**
+For each candidate that you keep, assign it to exactly ONE bucket and give it \
+a narrative_score from 0.0 (no fit) to 1.0 (perfect fit). \
+A segment may only appear once across all bucket assignments. \
+List the segment_ids you are pruning in pruned_segment_ids with a brief reason \
+appended as a comment (these go into reasoning, not a separate field).
+
+**4. Reasoning.**
+Write a short paragraph explaining your overall editorial approach to this scene: \
+what story beat it covers, why you chose these buckets, and any coverage gaps.
+"""
+
+EDITORIAL_SELECTOR_PROMPT = """\
+You are a film editor making the final cut selection for a scene. \
+You have been given the {top_k} best candidate clip chains assembled for this scene, \
+each described with its cost breakdown and duration.
+
+### Scene
+Scene ID: {scene_id}
+Scene description: {scene_description}
+Target duration: {target_duration_ideal:.1f}s  (range {target_duration_min:.1f}–{target_duration_max:.1f}s)
+
+### Candidate chains
+{chains_formatted}
+(Format per chain: index | total_cost | duration_s | segments in bucket order)
+
+### Instructions
+Select the chain that best serves the narrative intent of this scene. Consider:
+- **Visual flow**: reward framing progressions (wide → medium → close or reverse).
+- **Pacing variety**: avoid monotonous sequences of all-static or all-motion clips.
+- **Narrative fit**: higher-cost chains may still be acceptable if they tell the \
+  story more effectively than lower-cost alternatives.
+
+Return selected_chain_index as a 0-based index into the list above. \
+Write a clear reasoning explaining your editorial choice.
+"""
+
+STITCHING_PROMPT = """\
+You are a film editor resolving a transition between two consecutive scenes. \
+The transition has been flagged because the kinematic motion at the cut point \
+creates a jarring visual discontinuity (cost {kinematic_cost:.3f}, threshold {threshold:.3f}).
+
+### Outgoing scene (Scene {scene_id_a})
+{scene_a_description}
+Exit segment: {exit_segment_id} — {exit_segment_description}
+
+### Incoming scene (Scene {scene_id_b})
+{scene_b_description}
+Current entry segment: {entry_segment_id} — {entry_segment_description}
+
+### Swap candidates for the entry of Scene {scene_id_b}
+{swap_candidates_formatted}
+(Format: segment_id | boundary_cost_if_used | description)
+
+### Choose a resolution strategy
+
+**transition** — Accept the current edit and mask the discontinuity with a \
+visual transition (e.g. dissolve, dip_to_black). Best when the narrative \
+calls for a felt scene break or time skip.
+
+**swap_entry** — Replace the current entry segment of Scene {scene_id_b} \
+with a swap candidate that provides smoother kinematic entry. Best when a \
+suitable alternative exists and preserving the hard cut matters.
+
+**swap_exit** — Replace the exit segment of Scene {scene_id_a} \
+(not applicable here — no exit candidates provided). Use "swap_entry" instead \
+if you want to swap from the outgoing side.
+
+**accept** — Accept the cut as-is. Use only when the narrative tension or \
+intentional hard cut justifies the kinematic mismatch.
+
+Provide your chosen action, the relevant transition_type or swap_segment_id, \
+and a clear reasoning.
+"""
+
+REVIEWER_PROMPT = """\
+You are a senior post-production supervisor performing a final quality review \
+of an assembled edit timeline before sign-off.
+
+### Original storyboard scenes
+{storyboard_scenes}
+
+### Assembled timeline
+{timeline_summary}
+
+### Boundary decisions
+{boundary_summary}
+
+### Review criteria
+For each scene evaluate:
+1. **Duration** — is the total duration appropriate for the scene's narrative weight? \
+   Flag as structural if off by more than 50%% from the storyboard intent.
+2. **Coverage** — does the scene cover its narrative beat?  Missing coverage = structural.
+3. **Visual variety** — does the scene have meaningful shot variety (framing, movement)?  \
+   Monotonous sequences = minor issue.
+4. **Cut continuity** — are intra-scene cuts visually coherent?  Jarring cuts = minor issue.
+
+**Severity rules:**
+- "structural": wrong scene order, missing narrative beat, duration off > 50%%, \
+  scene completely misaligned with storyboard.
+- "minor": suboptimal framing variety, marginal quality clip, slightly long/short duration.
+
+**Auto-fixes** (only for minor issues):
+- If a scene is slightly over or under duration and an alternative chain exists, \
+  you may propose trimming a clip or swapping to a shorter/longer alternative.  \
+  Describe the fix in auto_fix_applied.
+
+Set has_structural_issues=true if ANY scene_note has severity="structural". \
+Set decision="approve" only when has_structural_issues=false. \
+overall_score: 0.0–1.0 holistic quality of the edit.
+"""
+
+
 STORYBOARD_PROMPT = """
 You are a professional movie director. \
 You will receive a list of narration segments from your screenwriter and your task is to \
 create a storyboard out of it. For this, create detailed scene descriptions from these narration segments. \
+You may collapse narration segments into one scene if it fits the story arc and the available footage. 
 This storyboard will be used to create the editing script, which will \
 retrieve video segments and arrange them semantically to create an edit timeline \
 matching the storyboard.
@@ -287,6 +433,7 @@ to align your scene descriptions with the available content.
 ### Instructions
 - In the scene descriptions, use descriptive language useful for matching with video descriptions semantically.
 - Preserve the tone and arc of the original story.
+- You may collapse several narration segments into one scene if fitting the story and available footage.
 - Number scenes sequentially starting from 1.
 
 Return strictly valid JSON. No markdown fences, no prose outside the object.
@@ -295,7 +442,7 @@ Return strictly valid JSON. No markdown fences, no prose outside the object.
   "scenes": [
 {{
       "id": 1,
-      "narration_segment": "<Segment of the original story serving as content anchor>"
+      "narration_segment": "<Segment(s) of the original story serving as content anchor>"
       "scene_description": "<narration text for this segment>"
       "reasoning": "<short reasoning about the range of the chosen segment and the crafted scene>"
       "keywords": [List of max 7 keywords describing the scene]
