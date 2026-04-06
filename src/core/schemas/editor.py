@@ -29,8 +29,8 @@ class BucketDefinition(BaseModel):
 
 class BucketAssignment(BaseModel):
     segment_id: str
-    bucket_idx: int
-    narrative_score: float  # 0.0–1.0 — how well this segment fits the bucket
+    bucket_idx: int = 0          # default to first bucket if LLM omits it
+    narrative_score: float = 0.5 # default to neutral score if LLM omits it
 
 
 class NarrativeAnalysis(BaseModel):
