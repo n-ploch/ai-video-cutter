@@ -1,16 +1,69 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
+from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Iterator, TypeVar
 
 from pydantic import BaseModel
 
 from core.project import Project
 from core.schemas.video import VideoFile
+
+
+# ── Storage backend ABC ───────────────────────────────────────────────────────
+
+class StorageBackend(ABC):
+    """Abstract blob-storage backend.
+
+    Keys are forward-slash path strings relative to the storage root,
+    e.g. ``"my-project/videos/abc123/downsampled.mp4"``.
+
+    ``LocalBackend`` (``storage_local.py``) is the concrete implementation
+    for single-machine use.  A future ``S3Backend`` can implement the same
+    interface to enable cloud deployment without touching workflow code.
+    """
+
+    @abstractmethod
+    def read_bytes(self, key: str) -> bytes: ...
+
+    @abstractmethod
+    def write_bytes(self, key: str, data: bytes) -> None: ...
+
+    @abstractmethod
+    def exists(self, key: str) -> bool: ...
+
+    @abstractmethod
+    def list_keys(self, prefix: str) -> list[str]: ...
+
+    @abstractmethod
+    def delete(self, key: str) -> None: ...
+
+    @contextlib.contextmanager
+    @abstractmethod
+    def local_path(self, key: str) -> Iterator[Path]:
+        """Yield a real local ``Path`` for the given key.
+
+        ``LocalBackend``: yields the on-disk path directly (no copy).
+        ``S3Backend``: downloads to a temp file, yields it, re-uploads on
+        exit if the file was modified.
+
+        Workers use this to hand paths to ffmpeg, OpenCV, etc.
+        """
+        ...  # pragma: no cover
+
+    @abstractmethod
+    def get_url(self, key: str, expires_in: int = 3600) -> str:
+        """Return a URL usable by the UI.
+
+        ``LocalBackend``: returns ``/files/<key>`` (served by FastAPI
+        StaticFiles).  ``S3Backend``: returns a pre-signed URL.
+        """
+        ...
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -38,9 +91,10 @@ def hash_video_file(path: Path) -> str:
 
 # ── Manifest helpers ──────────────────────────────────────────────────────────
 
-def _empty_video_entry(path: Path, video_hash: str) -> dict:
+def _empty_video_entry(path: Path, video_hash: str, storage_key: str | None = None) -> dict:
     return {
         "original_path": str(path.resolve()),
+        "storage_key": storage_key,   # backend-relative key; None for CLI-added videos
         "filename": path.name,
         "hash": video_hash,
         "added_at": datetime.now(timezone.utc).isoformat(),
@@ -66,10 +120,16 @@ class ProjectStorage:
         self,
         root: Path = Path("data/projects"),
         default_config: Path = Path("config/default.yaml"),
+        backend: StorageBackend | None = None,
     ):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._default_config = Path(default_config)
+        if backend is None:
+            from core.storage_local import LocalBackend
+            self.backend: StorageBackend = LocalBackend(self.root)
+        else:
+            self.backend = backend
 
     # ── Project lifecycle ─────────────────────────────────────────────────────
 

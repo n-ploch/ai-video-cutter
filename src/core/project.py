@@ -22,3 +22,7 @@ class Project(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     video_files: list[VideoFile] = []
     status: ProjectStatus = ProjectStatus.created
+    # Celery task IDs keyed by purpose, e.g.:
+    #   {video_hash: chain_root_task_id, "storyboard_task_id": ...,
+    #    "storyboard_thread_id": ..., "editor_task_id": ...}
+    task_ids: dict[str, str] = Field(default_factory=dict)

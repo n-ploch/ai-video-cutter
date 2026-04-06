@@ -13,6 +13,11 @@ class VideoFile(BaseModel):
     width: int
     height: int
     codec: str
+    # Backend-relative key for the source file, e.g.
+    # "my-project/videos/abc123/original.mp4".  None for videos added via
+    # the CLI (where ``path`` is authoritative).  Set by the API upload
+    # endpoint so workers can resolve the file via StorageBackend.local_path().
+    storage_key: str | None = None
 
     @field_validator("path", mode="before")
     @classmethod
