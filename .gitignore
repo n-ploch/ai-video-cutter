@@ -13,3 +13,5 @@ CLAUDE*.md
 fixtures/
 
 .env
+
+.claude
