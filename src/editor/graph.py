@@ -56,12 +56,19 @@ def _route_review(state: EditorState) -> str:
 
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
-def build_graph(
+_EDITOR_INTERRUPT_NODES = [
+    "assemble_scenes",    # Gate 1: post-dedup, pre-assembly
+    "review_timeline",    # Gate 2: post-stitch, human sets flagged_scene_ids
+    "persist_timeline",   # Gate 3: final approval
+]
+
+
+def _build_uncompiled_graph(
     cfg: EditorConfig,
     storage: ProjectStorage,
     project_name: str,
-):
-    """Build and compile the timeline assembly LangGraph graph."""
+) -> StateGraph:
+    """Return the raw (uncompiled) StateGraph shared by build_graph variants."""
     analyst_llm = create_llm(cfg.narrative_analyst)
     selector_llm = create_llm(cfg.editorial_selector)
     stitcher_llm = create_llm(cfg.stitching_agent)
@@ -84,7 +91,6 @@ def build_graph(
     graph.add_edge("deduplicate_candidates", "fill_gaps")
     graph.add_edge("fill_gaps", "assemble_scenes")
 
-    # Optional stitching / review
     after_assemble_targets = {"stitch_scenes", "review_timeline", "persist_timeline"}
     graph.add_conditional_edges(
         "assemble_scenes",
@@ -97,7 +103,6 @@ def build_graph(
         _route_after_stitch(cfg),
         {t: t for t in after_stitch_targets},
     )
-
     graph.add_conditional_edges(
         "review_timeline",
         _route_review,
@@ -107,6 +112,16 @@ def build_graph(
         },
     )
     graph.add_edge("persist_timeline", END)
+    return graph
+
+
+def build_graph(
+    cfg: EditorConfig,
+    storage: ProjectStorage,
+    project_name: str,
+):
+    """Build and compile the timeline assembly LangGraph graph (CLI / in-process use)."""
+    graph = _build_uncompiled_graph(cfg, storage, project_name)
 
     if cfg.human_in_the_loop:
         from langgraph.checkpoint.memory import MemorySaver  # type: ignore
@@ -114,14 +129,33 @@ def build_graph(
         checkpointer = MemorySaver()
         return graph.compile(
             checkpointer=checkpointer,
-            interrupt_before=[
-                "assemble_scenes",    # Gate 1: post-dedup, pre-assembly
-                "review_timeline",    # Gate 2: post-stitch, human sets flagged_scene_ids
-                "persist_timeline",   # Gate 3: final approval
-            ],
+            interrupt_before=_EDITOR_INTERRUPT_NODES,
         )
 
     return graph.compile()
+
+
+def build_graph_with_checkpointer(
+    cfg: EditorConfig,
+    storage: ProjectStorage,
+    project_name: str,
+    checkpointer,
+    human_in_the_loop: bool | None = None,
+):
+    """Build and compile the editor graph with an external checkpointer.
+
+    Used by the Celery worker layer so that graph state is persisted to Redis
+    (via ``RedisSaver``) rather than in-process memory.
+
+    ``human_in_the_loop`` overrides ``cfg.human_in_the_loop`` when provided.
+    """
+    hitl = human_in_the_loop if human_in_the_loop is not None else cfg.human_in_the_loop
+    graph = _build_uncompiled_graph(cfg, storage, project_name)
+    interrupt_nodes = _EDITOR_INTERRUPT_NODES if hitl else []
+    return graph.compile(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_nodes,
+    )
 
 
 # ── Helper: detect storyboard version from symlink ────────────────────────────
