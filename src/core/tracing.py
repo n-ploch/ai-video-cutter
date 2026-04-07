@@ -34,6 +34,27 @@ def get_langfuse_handler(session_id: str, tags: list[str] | None = None):
     return CallbackHandler()
 
 
+def get_langfuse_metadata(
+    session_id: str,
+    trace_name: str,
+    tags: list[str] | None = None,
+) -> dict | None:
+    """Return langfuse metadata dict for config["metadata"], or None if not configured.
+
+    Pass the returned dict as ``config["metadata"]`` when calling
+    ``compiled.invoke()`` to set the trace name, session ID, and tags in Langfuse.
+    The ``CallbackHandler`` does not accept these attributes in its constructor —
+    they must be supplied via the invocation metadata.
+    """
+    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
+        return None
+    return {
+        "langfuse_session_id": session_id,
+        "langfuse_trace_name": trace_name,
+        "langfuse_tags": tags or [],
+    }
+
+
 def flush_langfuse() -> None:
     """Flush pending Langfuse spans to the backend.
 

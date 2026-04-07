@@ -62,6 +62,7 @@ def _invoke_and_check(
     task_name: str,
     gate_overrides: dict | None = None,
     callbacks: list | None = None,
+    metadata: dict | None = None,
 ) -> dict:
     """Run a compiled LangGraph graph and return a status dict.
 
@@ -78,10 +79,14 @@ def _invoke_and_check(
                              (editor only; ignored on fresh runs).
         callbacks:           Optional list of LangChain callbacks (e.g. Langfuse
                              CallbackHandler) forwarded to every graph invocation.
+        metadata:            Optional dict merged into config["metadata"] (e.g.
+                             Langfuse trace name, session ID, tags).
     """
     langgraph_config: dict = {"configurable": {"thread_id": effective_thread_id}}
     if callbacks:
         langgraph_config["callbacks"] = callbacks
+    if metadata:
+        langgraph_config["metadata"] = metadata
 
     with _make_checkpointer() as checkpointer:
         compiled = build_compiled(checkpointer)
@@ -193,9 +198,10 @@ def task_run_storyboard(
             "max_revisions": cfg.max_revisions,
         }
 
-    from core.tracing import flush_langfuse, get_langfuse_handler
+    from core.tracing import flush_langfuse, get_langfuse_handler, get_langfuse_metadata
 
     handler = get_langfuse_handler(session_id=project_name, tags=["storyboard"])
+    metadata = get_langfuse_metadata(session_id=project_name, trace_name="storyboard", tags=["storyboard"])
     result = _invoke_and_check(
         build_compiled=lambda cp: build_graph_with_checkpointer(cfg, storage, project_name, cp, human_in_the_loop),
         initial_state=initial_state,
@@ -203,6 +209,7 @@ def task_run_storyboard(
         effective_thread_id=effective_thread_id,
         task_name="task_run_storyboard",
         callbacks=[handler] if handler else None,
+        metadata=metadata,
     )
     flush_langfuse()
     return result
@@ -293,9 +300,10 @@ def task_run_editor(
             "top_k_chains": cfg.top_k_chains,
         }
 
-    from core.tracing import flush_langfuse, get_langfuse_handler
+    from core.tracing import flush_langfuse, get_langfuse_handler, get_langfuse_metadata
 
     handler = get_langfuse_handler(session_id=project_name, tags=["editor"])
+    metadata = get_langfuse_metadata(session_id=project_name, trace_name="editor", tags=["editor"])
     result = _invoke_and_check(
         build_compiled=lambda cp: build_graph_with_checkpointer(cfg, storage, project_name, cp, human_in_the_loop),
         initial_state=initial_state,
@@ -304,6 +312,7 @@ def task_run_editor(
         task_name="task_run_editor",
         gate_overrides=gate_overrides,
         callbacks=[handler] if handler else None,
+        metadata=metadata,
     )
     flush_langfuse()
     return result

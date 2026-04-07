@@ -191,12 +191,15 @@ def run(
         "max_revisions": cfg.max_revisions,
     }
 
-    from core.tracing import flush_langfuse, get_langfuse_handler
+    from core.tracing import flush_langfuse, get_langfuse_handler, get_langfuse_metadata
 
     handler = get_langfuse_handler(session_id=project_name, tags=["storyboard"])
+    metadata = get_langfuse_metadata(session_id=project_name, trace_name="storyboard", tags=["storyboard"])
     config: dict = {"configurable": {"thread_id": project_name}} if cfg.human_in_the_loop else {}
     if handler:
         config["callbacks"] = [handler]
+    if metadata:
+        config["metadata"] = metadata
     final_state = compiled.invoke(initial_state, config=config)
     flush_langfuse()
 
