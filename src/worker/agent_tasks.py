@@ -94,6 +94,24 @@ def _invoke_and_check(
         if initial_state is not None:
             compiled.invoke(initial_state, config=langgraph_config)
         else:
+            # Verify there is actually a paused checkpoint to resume from.
+            resume_snapshot = compiled.get_state(langgraph_config)
+            if not resume_snapshot.values:
+                raise ValueError(
+                    f"{task_name}: no checkpoint found for thread_id={effective_thread_id!r}. "
+                    "Trigger a fresh run before calling resume."
+                )
+            if not resume_snapshot.next:
+                log.warning(
+                    "%s: project=%s thread=%s already completed — nothing to resume",
+                    task_name, project_name, effective_thread_id,
+                )
+                return {
+                    "status": "complete",
+                    "thread_id": effective_thread_id,
+                    "project_name": project_name,
+                    "paused_at": [],
+                }
             if gate_overrides:
                 compiled.update_state(langgraph_config, gate_overrides)
             compiled.invoke(None, config=langgraph_config)
