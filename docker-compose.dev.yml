@@ -1,0 +1,8 @@
+# Development overrides — disables Redis persistence so queued tasks do not
+# survive a Ctrl+C / docker compose restart.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  redis:
+    command: redis-stack-server --save "" --appendonly no
