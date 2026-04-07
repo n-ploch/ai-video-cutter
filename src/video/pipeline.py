@@ -498,6 +498,7 @@ class Pipeline:
 
     def _execute(self, ctx: PipelineContext) -> PipelineContext:
         for step in self.steps:
+            log.debug("Pipeline: starting %s", step.__class__.__name__)
             step.check_inputs(ctx)
             ctx = step.run(ctx)
         return ctx

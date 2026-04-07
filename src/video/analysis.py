@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from core.schemas.segment import CameraMovement, SegmentBase, make_segment_id
@@ -8,6 +10,8 @@ from video.segmentation import (
     detect_scene_boundaries,
     movement_stats,
 )
+
+log = logging.getLogger(__name__)
 
 
 def build_segments(
@@ -38,6 +42,10 @@ def build_segments(
     stats_signal = raw_signal if raw_signal is not None else signal
 
     scene_boundaries = detect_scene_boundaries(signal, penalty=fd_penalty)
+    log.debug(
+        "build_segments: %d scene boundaries detected (fd_penalty=%.1f)",
+        len(scene_boundaries), fd_penalty,
+    )
     starts = [0] + scene_boundaries[:-1]
     ends = scene_boundaries
 

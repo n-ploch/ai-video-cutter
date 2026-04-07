@@ -1,9 +1,12 @@
 """Clip extraction utilities using ffmpeg-python."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import ffmpeg
+
+log = logging.getLogger(__name__)
 
 
 def extract_clip(
@@ -35,6 +38,8 @@ def extract_clip(
     duration = end - start
     if duration <= 0:
         raise ValueError(f"end ({end}) must be greater than start ({start})")
+
+    log.debug("extract_clip: %s [%.3f–%.3f s] → %s", Path(video_path).name, start, end, output_path.name)
 
     try:
         if fast_seek:

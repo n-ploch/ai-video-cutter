@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
 from core.schemas.video import ProcessingConfig
+
+log = logging.getLogger(__name__)
 
 
 class DownsampleError(Exception):
@@ -47,10 +50,18 @@ def downsample_video(
         str(output_path),
     ]
 
+    log.info(
+        "downsample: %s → %s (width=%d%s)",
+        input_path.name,
+        output_path.name,
+        config.target_width,
+        f", fps={config.target_fps}" if config.target_fps is not None else "",
+    )
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise DownsampleError(
             f"ffmpeg failed:\n{result.stderr[-2000:]}"
         )
 
+    log.debug("downsample: complete → %s", output_path)
     return output_path
