@@ -33,3 +33,7 @@ app.autodiscover_tasks(["worker.video_tasks", "worker.vlm_tasks", "worker.agent_
 # Configure logging for the worker process.
 from core.logging_config import setup_logging  # noqa: E402
 setup_logging()
+
+# Instrument google-genai SDK for Langfuse tracing (no-op if unconfigured).
+from core.tracing import setup_langfuse_instrumentation  # noqa: E402
+setup_langfuse_instrumentation()

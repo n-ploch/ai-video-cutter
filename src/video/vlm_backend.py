@@ -13,8 +13,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from langfuse.decorators import langfuse_context, observe  # type: ignore[import]
-
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -84,16 +82,9 @@ class GeminiFileAPIBackend(VLMBackend):
         self._poll_interval = poll_interval_s
         self._poll_max = poll_max_attempts
 
-    @observe(as_type="generation")  # type: ignore[misc]
     def analyze_video(self, video_path: Path, prompt: str) -> str:
         """Upload video, wait for ACTIVE state, call model, return response text."""
         import google.genai.types as types  # type: ignore[import-untyped]
-
-        langfuse_context.update_current_observation(
-            model=self._model,
-            input=prompt,
-            metadata={"video_file": video_path.name},
-        )
 
         uploaded = self._upload_and_wait(video_path)
         try:
@@ -111,7 +102,6 @@ class GeminiFileAPIBackend(VLMBackend):
                 config=types.GenerateContentConfig(temperature=self._temperature),
             )
             log.debug("GeminiBackend: response length=%d chars", len(response.text or ""))
-            langfuse_context.update_current_observation(output=response.text)
             return response.text
         finally:
             # Best-effort delete; files auto-expire after 48h if this fails.
