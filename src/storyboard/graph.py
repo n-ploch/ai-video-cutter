@@ -48,12 +48,12 @@ def _route_judge(state: StoryboardState) -> str:
     return "director"
 
 
-def build_graph(
+def _build_uncompiled_graph(
     cfg: StoryboardConfig,
     storage: ProjectStorage,
     project_name: str,
 ) -> StateGraph:
-    """Build and compile the storyboard LangGraph graph."""
+    """Return the raw (uncompiled) StateGraph shared by build_graph variants."""
     story_writer_llm = create_llm(cfg.story_writer)
     story_judge_llm = create_llm(cfg.story_judge)
     narrator_llm = create_llm(cfg.narrator)
@@ -84,6 +84,16 @@ def build_graph(
         {"persist": "persist", "story_writer": "story_writer", "director": "director"},
     )
     graph.add_edge("persist", END)
+    return graph
+
+
+def build_graph(
+    cfg: StoryboardConfig,
+    storage: ProjectStorage,
+    project_name: str,
+):
+    """Build and compile the storyboard LangGraph graph (CLI / in-process use)."""
+    graph = _build_uncompiled_graph(cfg, storage, project_name)
 
     if cfg.human_in_the_loop:
         from langgraph.checkpoint.memory import MemorySaver
@@ -95,6 +105,32 @@ def build_graph(
         )
 
     return graph.compile()
+
+
+def build_graph_with_checkpointer(
+    cfg: StoryboardConfig,
+    storage: ProjectStorage,
+    project_name: str,
+    checkpointer,
+    human_in_the_loop: bool | None = None,
+):
+    """Build and compile the storyboard graph with an external checkpointer.
+
+    Used by the Celery worker layer so that graph state is persisted to Redis
+    (via ``RedisSaver``) rather than in-process memory, enabling the worker
+    to exit after hitting an interrupt and resume in a subsequent task.
+
+    ``human_in_the_loop`` overrides ``cfg.human_in_the_loop`` when provided,
+    allowing the API caller to enable/disable gates per-request without
+    modifying the project config on disk.
+    """
+    hitl = human_in_the_loop if human_in_the_loop is not None else cfg.human_in_the_loop
+    graph = _build_uncompiled_graph(cfg, storage, project_name)
+    interrupt_nodes = ["director"] if hitl else []
+    return graph.compile(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_nodes,
+    )
 
 
 def run(

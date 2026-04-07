@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import yaml
@@ -134,3 +135,36 @@ class Settings(BaseModel):
             self.video.model_dump(mode="json"), sort_keys=True
         )
         return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+# ── Service-layer settings ────────────────────────────────────────────────────
+
+class AppSettings(BaseModel):
+    """Runtime settings for the API + worker services.
+
+    Loaded from environment variables (not from YAML).  The workflow
+    ``Settings`` are still loaded from the per-project ``config.yaml`` by
+    each worker task.
+    """
+    storage_backend: str = "local"
+    storage_root: Path = Path("local/data/projects")
+    redis_url: str = "redis://localhost:6379/0"
+    default_config_path: Path = Path("config/default.yaml")
+
+    @classmethod
+    def from_env(cls) -> "AppSettings":
+        return cls(
+            storage_backend=os.environ.get("STORAGE_BACKEND", "local"),
+            storage_root=Path(os.environ.get("STORAGE_ROOT", "local/data/projects")),
+            redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+            default_config_path=Path(os.environ.get("CONFIG_PATH", "config/default.yaml")),
+        )
+
+    def load_settings(self, project_name: str | None = None) -> Settings:
+        """Load workflow Settings, preferring the per-project config when available."""
+        config_path = self.default_config_path
+        if project_name:
+            project_config = self.storage_root / project_name / "config.yaml"
+            if project_config.exists():
+                config_path = project_config
+        return Settings.load(config_path)

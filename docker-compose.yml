@@ -1,0 +1,146 @@
+services:
+
+  # ── Message broker + result backend ────────────────────────────────────────
+  redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── REST API ────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./local/data/projects:/app/data/projects
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_BACKEND=local
+      - STORAGE_ROOT=/app/data/projects
+      - CONFIG_PATH=/app/config/default.yaml
+      # Absolute path to the projects folder on the *host* machine.
+      # Used by the OTIO exporter so target_url resolves correctly in NLEs.
+      # Override in .env or here: HOST_STORAGE_ROOT=/absolute/path/to/local/data/projects
+      - HOST_STORAGE_ROOT=${HOST_STORAGE_ROOT:-}
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Video pipeline worker (CPU) ─────────────────────────────────────────────
+  # Runs DownsampleStep, OpticalFlowStep, SegmentScenesStep, PersistStep.
+  # concurrency=2 → two videos process in parallel.
+  celery-video:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    volumes:
+      - ./local/data/projects:/app/data/projects
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_BACKEND=local
+      - STORAGE_ROOT=/app/data/projects
+      - CONFIG_PATH=/app/config/default.yaml
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app worker
+        --queues video
+        --concurrency 2
+        --loglevel info
+        --hostname video@%h
+    restart: unless-stopped
+
+  # ── VLM description worker (API/IO-bound) ───────────────────────────────────
+  # Uploads clips to Gemini File API and polls for results.
+  # concurrency=1 → respect Gemini rate limits.
+  celery-vlm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    volumes:
+      - ./local/data/projects:/app/data/projects
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_BACKEND=local
+      - STORAGE_ROOT=/app/data/projects
+      - CONFIG_PATH=/app/config/default.yaml
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app worker
+        --queues vlm
+        --concurrency 1
+        --loglevel info
+        --hostname vlm@%h
+    restart: unless-stopped
+
+  # ── LangGraph agent worker (LLM API-bound) ──────────────────────────────────
+  # Runs storyboard and editor LangGraph workflows.
+  # concurrency=1 → one long-running agent at a time (avoids OOM from models).
+  celery-agents:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    volumes:
+      - ./local/data/projects:/app/data/projects
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_BACKEND=local
+      - STORAGE_ROOT=/app/data/projects
+      - CONFIG_PATH=/app/config/default.yaml
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app worker
+        --queues agents
+        --concurrency 1
+        --loglevel info
+        --hostname agents@%h
+    restart: unless-stopped
+
+  # ── Optional: Flower task monitor ──────────────────────────────────────────
+  # Uncomment to enable the Celery monitoring dashboard at http://localhost:5555
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A worker.celery_app flower --port=5555
+
+volumes:
+  redis_data:

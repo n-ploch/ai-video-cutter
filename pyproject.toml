@@ -31,7 +31,23 @@ dependencies = [
     "langchain-google-genai>=2.0",
     "langchain-mistralai>=0.2",
     "networkx>=3.0",
+    "opentimelineio>=0.16",
 ]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "pyyaml>=6.0",
+]
+worker = [
+    "celery[redis]>=5.3",
+    "flower>=2.0",
+    "redis>=5.0",
+    "langgraph-checkpoint-redis>=0.0.1",
+]
+all = ["ai-video-cutter[api,worker]"]
 
 [project.scripts]
 vc = "cli:app"

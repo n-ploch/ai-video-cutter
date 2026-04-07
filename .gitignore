@@ -14,4 +14,4 @@ fixtures/
 
 .env
 
-.claude
+.claudelocal/data/

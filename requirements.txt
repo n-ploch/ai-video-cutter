@@ -14,3 +14,4 @@ matplotlib==3.10.8
 pandas==3.0.1
 umap-learn==0.5.11
 networkx>=3.0
+opentimelineio>=0.16
