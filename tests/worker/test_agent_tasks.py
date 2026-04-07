@@ -85,7 +85,7 @@ def test_storyboard_resume_invokes_none():
     """Resume (thread_id provided) calls invoke(None, ...) to reload checkpoint."""
     from worker.agent_tasks import task_run_storyboard
 
-    compiled = _make_compiled_mock()
+    compiled = _make_compiled_mock(paused_at=["some_node"])
     storage, settings = _mock_storage_and_settings_for_storyboard()
 
     with patch("worker.agent_tasks._get_storage_and_settings", return_value=(storage, settings)):
@@ -153,7 +153,7 @@ def test_editor_resume_applies_gate_overrides_before_invoke():
     """On resume, gate_overrides are injected via update_state() before invoke(None)."""
     from worker.agent_tasks import task_run_editor
 
-    compiled = _make_compiled_mock()
+    compiled = _make_compiled_mock(paused_at=["gate_node"])
     storage, settings = _mock_storage_and_settings_for_editor()
 
     overrides = {"gate2_overrides": {"scene_1": {"chain_index": 2}}, "flagged_scene_ids": [1]}

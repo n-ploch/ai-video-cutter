@@ -16,8 +16,10 @@ from core.schemas.video import ProcessingConfig, SegmentationConfig
 from core.storage import ProjectStorage, hash_video_file
 from video.pipeline import PipelineContext, default_pipeline
 
+from core.logging_config import setup_logging
+
+setup_logging()
 log = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 app = typer.Typer(add_completion=False)
 

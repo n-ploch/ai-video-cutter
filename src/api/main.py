@@ -4,6 +4,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from core.logging_config import setup_logging
+
+setup_logging()
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
