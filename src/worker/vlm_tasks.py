@@ -84,6 +84,9 @@ def task_vlm_describe(self, prev: dict) -> dict:
         vlm_step.check_inputs(ctx)
         vlm_step.run(ctx)
 
+    from core.tracing import flush_langfuse
+    flush_langfuse()
+
     log.info(
         "task_vlm_describe: project=%s hash=%s → %d descriptions",
         project_name, video_hash, len(segments),

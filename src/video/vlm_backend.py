@@ -6,11 +6,16 @@ in create_vlm_backend().
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from langfuse.decorators import langfuse_context, observe  # type: ignore[import]
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from core.config import VlmConfig
@@ -79,12 +84,20 @@ class GeminiFileAPIBackend(VLMBackend):
         self._poll_interval = poll_interval_s
         self._poll_max = poll_max_attempts
 
+    @observe(as_type="generation")  # type: ignore[misc]
     def analyze_video(self, video_path: Path, prompt: str) -> str:
         """Upload video, wait for ACTIVE state, call model, return response text."""
         import google.genai.types as types  # type: ignore[import-untyped]
 
+        langfuse_context.update_current_observation(
+            model=self._model,
+            input=prompt,
+            metadata={"video_file": video_path.name},
+        )
+
         uploaded = self._upload_and_wait(video_path)
         try:
+            log.info("GeminiBackend: calling %s on %s", self._model, video_path.name)
             response = self._client.models.generate_content(
                 model=self._model,
                 contents=[
@@ -97,6 +110,8 @@ class GeminiFileAPIBackend(VLMBackend):
                 ],
                 config=types.GenerateContentConfig(temperature=self._temperature),
             )
+            log.debug("GeminiBackend: response length=%d chars", len(response.text or ""))
+            langfuse_context.update_current_observation(output=response.text)
             return response.text
         finally:
             # Best-effort delete; files auto-expire after 48h if this fails.
@@ -112,11 +127,13 @@ class GeminiFileAPIBackend(VLMBackend):
 
     def _upload_and_wait(self, path: Path):
         """Upload *path* to the Gemini File API and poll until state == ACTIVE."""
+        log.info("GeminiBackend: uploading %s", path.name)
         uploaded = self._client.files.upload(file=str(path))
-        for _ in range(self._poll_max):
+        for attempt in range(self._poll_max):
             file_info = self._client.files.get(name=uploaded.name)
             state = str(file_info.state).upper()
             if "ACTIVE" in state:
+                log.debug("GeminiBackend: %s ACTIVE after %d poll(s)", path.name, attempt + 1)
                 return file_info
             if "FAILED" in state:
                 raise RuntimeError(

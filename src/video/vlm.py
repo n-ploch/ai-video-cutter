@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from langfuse.decorators import langfuse_context, observe  # type: ignore[import]
+
 from core.prompts import GLOBAL_ANALYSIS_PROMPT, SEGMENT_ANALYSIS_PROMPT
 from core.schemas.segment import SegmentBase, SegmentDescription
 from core.schemas.video_description import VideoDescription, VideoVlm
@@ -118,8 +120,13 @@ class VLMStep(PipelineStep):
                 "project_name/project_id is required — add PersistStep before VLMStep."
             )
 
+    @observe(name="vlm-step")  # type: ignore[misc]
     def run(self, ctx: PipelineContext) -> PipelineContext:
         project_name = ctx.project_id or ctx.project_name
+        langfuse_context.update_current_trace(
+            session_id=project_name,
+            tags=["vlm"],
+        )
         video_hash = ctx.video_hash
         video_path = ctx.downsampled_path or ctx.video_path
         vlm_cfg = self.config.vlm
