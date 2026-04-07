@@ -16,7 +16,7 @@ def get_langfuse_handler(session_id: str, tags: list[str] | None = None):
     if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
         return None
     from langfuse.langchain import CallbackHandler  # type: ignore[import]
-    return CallbackHandler(session_id=session_id, tags=tags or [])
+    return CallbackHandler()
 
 
 def flush_langfuse() -> None:
