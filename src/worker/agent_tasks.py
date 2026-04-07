@@ -61,6 +61,7 @@ def _invoke_and_check(
     effective_thread_id: str,
     task_name: str,
     gate_overrides: dict | None = None,
+    callbacks: list | None = None,
 ) -> dict:
     """Run a compiled LangGraph graph and return a status dict.
 
@@ -75,8 +76,12 @@ def _invoke_and_check(
         task_name:           Task name used in log messages.
         gate_overrides:      Human-supplied state updates injected before resume
                              (editor only; ignored on fresh runs).
+        callbacks:           Optional list of LangChain callbacks (e.g. Langfuse
+                             CallbackHandler) forwarded to every graph invocation.
     """
-    langgraph_config = {"configurable": {"thread_id": effective_thread_id}}
+    langgraph_config: dict = {"configurable": {"thread_id": effective_thread_id}}
+    if callbacks:
+        langgraph_config["callbacks"] = callbacks
 
     with _make_checkpointer() as checkpointer:
         compiled = build_compiled(checkpointer)
@@ -188,13 +193,19 @@ def task_run_storyboard(
             "max_revisions": cfg.max_revisions,
         }
 
-    return _invoke_and_check(
+    from core.tracing import flush_langfuse, get_langfuse_handler
+
+    handler = get_langfuse_handler(session_id=project_name, tags=["storyboard"])
+    result = _invoke_and_check(
         build_compiled=lambda cp: build_graph_with_checkpointer(cfg, storage, project_name, cp, human_in_the_loop),
         initial_state=initial_state,
         project_name=project_name,
         effective_thread_id=effective_thread_id,
         task_name="task_run_storyboard",
+        callbacks=[handler] if handler else None,
     )
+    flush_langfuse()
+    return result
 
 
 @app.task(
@@ -282,11 +293,17 @@ def task_run_editor(
             "top_k_chains": cfg.top_k_chains,
         }
 
-    return _invoke_and_check(
+    from core.tracing import flush_langfuse, get_langfuse_handler
+
+    handler = get_langfuse_handler(session_id=project_name, tags=["editor"])
+    result = _invoke_and_check(
         build_compiled=lambda cp: build_graph_with_checkpointer(cfg, storage, project_name, cp, human_in_the_loop),
         initial_state=initial_state,
         project_name=project_name,
         effective_thread_id=effective_thread_id,
         task_name="task_run_editor",
         gate_overrides=gate_overrides,
+        callbacks=[handler] if handler else None,
     )
+    flush_langfuse()
+    return result

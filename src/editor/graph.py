@@ -237,7 +237,13 @@ def run(
         "top_k_chains": cfg.top_k_chains,
     }
 
-    config = {"configurable": {"thread_id": project_name}} if cfg.human_in_the_loop else {}
+    from core.tracing import flush_langfuse, get_langfuse_handler
+
+    handler = get_langfuse_handler(session_id=project_name, tags=["editor"])
+    config: dict = {"configurable": {"thread_id": project_name}} if cfg.human_in_the_loop else {}
+    if handler:
+        config["callbacks"] = [handler]
     compiled.invoke(initial_state, config=config)
+    flush_langfuse()
 
     return storage.load_json(project_name, "timeline/latest.json", schema=TimelineOutput)

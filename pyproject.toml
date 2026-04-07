@@ -32,6 +32,7 @@ dependencies = [
     "langchain-mistralai>=0.2",
     "networkx>=3.0",
     "opentimelineio>=0.16",
+    "langfuse>=2.0",
 ]
 
 [project.optional-dependencies]
