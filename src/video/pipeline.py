@@ -154,7 +154,7 @@ class DownsampleStep(PipelineStep):
 
         from core.storage import hash_video_file
 
-        stem = ctx.video_path.stem
+        stem = ctx.video_path.stem.removesuffix("_original")
         fmt = self.proc_config.output_format
 
         if self.storage is not None:

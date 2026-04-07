@@ -121,8 +121,9 @@ async def upload_video(
     try:
         video_hash = hash_video_file(tmp_path)
 
-        # Destination key: {project_name}/videos/{hash}/original{suffix}
-        storage_key = f"{project_name}/videos/{video_hash}/original{suffix}"
+        # Destination key: {project_name}/videos/{hash}/{original_stem}_original{suffix}
+        original_stem = Path(file.filename).stem if file.filename else "video"
+        storage_key = f"{project_name}/videos/{video_hash}/{original_stem}_original{suffix}"
         dest_path = storage.root / storage_key
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
