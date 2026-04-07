@@ -112,25 +112,11 @@ def get_storyboard(
 
 
 def _inject_storyboard_feedback(thread_id: str, feedback: str) -> None:
-    """Inject revised user_brief into the LangGraph Redis checkpoint."""
-    import os
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-    try:
-        from langgraph.checkpoint.redis import RedisSaver  # type: ignore
-        from storyboard.graph import _build_uncompiled_graph  # noqa: F401
+    """Inject revised user_brief into the LangGraph Redis checkpoint.
 
-        checkpointer = RedisSaver.from_conn_string(redis_url)
-        langgraph_config = {"configurable": {"thread_id": thread_id}}
-        # We need a compiled graph to call update_state.
-        # Use a dummy compiled graph with the same checkpointer.
-        checkpointer.put(
-            {"configurable": {"thread_id": thread_id}},
-            checkpointer.get({"configurable": {"thread_id": thread_id}}),
-            metadata={},
-        )
-        # Simpler: directly update via the checkpointer's stored state.
-        # Full implementation requires building the graph — done in agent_tasks
-        # on resume where gate_overrides / feedback can be passed.
-        log.info("_inject_storyboard_feedback: thread_id=%s feedback injected", thread_id)
-    except Exception as exc:
-        log.warning("Could not inject feedback into checkpoint: %s", exc)
+    NOTE: feedback injection is handled via gate_overrides / user_brief on
+    the resume task invocation in agent_tasks.py. This function is a stub
+    kept for API compatibility; actual feedback is passed through the resume
+    endpoint body and applied in task_run_storyboard when thread_id is set.
+    """
+    log.info("_inject_storyboard_feedback: thread_id=%s feedback will be applied on resume", thread_id)
