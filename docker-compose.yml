@@ -29,6 +29,10 @@ services:
       - STORAGE_BACKEND=local
       - STORAGE_ROOT=/app/data/projects
       - CONFIG_PATH=/app/config/default.yaml
+      # Absolute path to the projects folder on the *host* machine.
+      # Used by the OTIO exporter so target_url resolves correctly in NLEs.
+      # Override in .env or here: HOST_STORAGE_ROOT=/absolute/path/to/local/data/projects
+      - HOST_STORAGE_ROOT=${HOST_STORAGE_ROOT:-}
     env_file:
       - .env
     depends_on:

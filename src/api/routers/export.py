@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+from urllib.request import pathname2url
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -61,12 +64,23 @@ def export_timeline(
     if not json_path.exists():
         raise HTTPException(status_code=404, detail=f"Timeline version '{version}' not found")
 
-    # Build source_video hash → path map from manifest.
+    # Build source_video hash → file:// URI map from manifest.
+    # NLEs (e.g. DaVinci Resolve) require absolute file:// URIs in target_url.
+    # For API-uploaded videos (storage_key set): resolve against HOST_STORAGE_ROOT
+    # if set (host-side absolute path), otherwise fall back to the container path.
+    # For CLI-added videos (no storage_key): original_path is already an absolute
+    # host path.
+    host_root_env = os.environ.get("HOST_STORAGE_ROOT", "").strip()
+    effective_root = Path(host_root_env) if host_root_env else storage.root
+
     manifest = storage._load_manifest(project_name)
-    video_paths: dict[str, str] = {
-        h: entry.get("storage_key") or entry.get("original_path", "")
-        for h, entry in manifest.get("videos", {}).items()
-    }
+    video_paths: dict[str, str] = {}
+    for h, entry in manifest.get("videos", {}).items():
+        if entry.get("storage_key"):
+            abs_path = effective_root / entry["storage_key"]
+        else:
+            abs_path = Path(entry.get("original_path", ""))
+        video_paths[h] = "file://" + pathname2url(str(abs_path))
 
     timeline: TimelineOutput = storage.load_json(
         project_name,
