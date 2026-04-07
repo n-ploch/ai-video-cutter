@@ -29,3 +29,7 @@ app.conf.update(
 
 # Auto-discover tasks in all worker modules.
 app.autodiscover_tasks(["worker.video_tasks", "worker.vlm_tasks", "worker.agent_tasks"])
+
+# Configure logging for the worker process.
+from core.logging_config import setup_logging  # noqa: E402
+setup_logging()
