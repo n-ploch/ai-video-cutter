@@ -745,6 +745,7 @@ def make_persist_timeline_node(storage, project_name: str):
         BoundaryInfo,
         SceneTimeline,
         StitchDecision,
+        StoryboardMeta,
         TimelineOutput,
         TimelineReview,
         TimelineSegmentEntry,
@@ -827,7 +828,10 @@ def make_persist_timeline_node(storage, project_name: str):
 
         output = TimelineOutput(
             project_name=state["project_name"],
-            storyboard_version=state["storyboard_version"],
+            storyboard=StoryboardMeta(
+                version=state["storyboard_version"],
+                user_brief=state["user_brief"],
+            ),
             scenes=scene_timelines,
             boundaries=[BoundaryInfo.model_validate(b) for b in state.get("boundaries", [])],
             stitch_decisions=[StitchDecision.model_validate(sd) for sd in state.get("stitch_decisions", [])],

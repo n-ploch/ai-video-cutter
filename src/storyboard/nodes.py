@@ -166,6 +166,7 @@ def make_persist_node(storage, project_name: str):
     def persist_node(state: StoryboardState) -> dict:
 
         output = StoryboardOutput(
+            user_brief=state["user_brief"],
             story=state["story"],
             narration_beats=[NarrationBeat.model_validate(b) for b in state["narration_beats"]],
             scenes=[StoryboardScene.model_validate(s) for s in state["scenes"]],

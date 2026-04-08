@@ -43,6 +43,7 @@ def _mock_storage_and_settings_for_editor():
     from core.schemas.storyboard import StoryboardOutput
     storyboard_data = MagicMock(spec=StoryboardOutput)
     storyboard_data.scenes = []
+    storyboard_data.user_brief = ""
     storage.load_json.return_value = storyboard_data
 
     settings = MagicMock()

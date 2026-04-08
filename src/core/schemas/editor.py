@@ -110,6 +110,13 @@ class TimelineReview(BaseModel):
     decision: Literal["approve", "revise"]
 
 
+# ── Storyboard reference (embedded in timeline) ───────────────────────────────
+
+class StoryboardMeta(BaseModel):
+    version: int
+    user_brief: str
+
+
 # ── Final persisted artifact ───────────────────────────────────────────────────
 
 class TimelineSegmentEntry(BaseModel):
@@ -138,7 +145,7 @@ class SceneTimeline(BaseModel):
 class TimelineOutput(BaseModel):
     """Versioned output of the timeline assembly agent."""
     project_name: str
-    storyboard_version: int
+    storyboard: StoryboardMeta
     scenes: list[SceneTimeline]
     boundaries: list[BoundaryInfo]
     stitch_decisions: list[StitchDecision]

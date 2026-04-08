@@ -134,11 +134,11 @@ def timeline_to_otio(
         track.markers.append(marker)
 
     otio_timeline = otio.schema.Timeline(
-        name=f"{timeline.project_name} v{timeline.storyboard_version}",
+        name=f"{timeline.project_name} v{timeline.storyboard.version}",
         metadata={
             "ai_video_cutter": {
                 "project_name": timeline.project_name,
-                "storyboard_version": timeline.storyboard_version,
+                "storyboard_version": timeline.storyboard.version,
                 "total_duration": timeline.total_duration,
                 "total_segments": timeline.total_segments,
                 "gate2_round": timeline.gate2_round,

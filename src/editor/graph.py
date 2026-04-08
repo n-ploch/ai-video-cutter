@@ -251,6 +251,7 @@ def run(
     initial_state: EditorState = {
         "project_name": project_name,
         "storyboard_version": storyboard_version,
+        "user_brief": storyboard_data.user_brief,
         "scenes": [s.model_dump() for s in storyboard_data.scenes],
         "segments": [s.model_dump(mode="json") for s in segments],
         "scene_candidates": {},

@@ -13,6 +13,7 @@ class EditorState(TypedDict):
     # ── Inputs ────────────────────────────────────────────────────────────────
     project_name: str
     storyboard_version: int
+    user_brief: str
     scenes: list[dict]      # list of StoryboardScene.model_dump()
     segments: list[dict]    # list of Segment.model_dump(mode="json")
 
