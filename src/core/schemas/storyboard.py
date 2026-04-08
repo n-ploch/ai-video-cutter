@@ -34,6 +34,7 @@ class JudgeResult(BaseModel):
 
 
 class StoryboardOutput(BaseModel):
+    user_brief: str
     story: str
     narration_beats: list[NarrationBeat]
     scenes: list[StoryboardScene]

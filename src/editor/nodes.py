@@ -185,13 +185,193 @@ def deduplicate_candidates_node(state: EditorState) -> dict:
     return {"deduped_candidates": deduped, "gap_warnings": gap_warnings}
 
 
-# ── Node: assemble scenes (Phases A + B + C) ──────────────────────────────────
+# ── Node: dispatch scenes (updates gate2_round; routing fn does the fan-out) ──
+
+def make_dispatch_scenes_node(cfg):
+    """Return a node that increments gate2_round for re-assembly rounds.
+
+    The actual fan-out to parallel ``assemble_scene`` nodes is performed by
+    ``_fan_out_scenes`` (a routing function used with ``add_conditional_edges``
+    in graph.py).  Keeping state updates and routing separate avoids mixing
+    ``Send()`` objects with dict returns from the same node.
+    """
+
+    def dispatch_scenes_node(state: EditorState) -> dict:
+        flagged = state.get("flagged_scene_ids") or []
+        is_reassembly = bool(flagged) or (state.get("review") is not None)
+        new_gate2_round = state["gate2_round"] + 1 if is_reassembly else state["gate2_round"]
+        # Clear flagged_scene_ids here (single node, before parallel fan-out) so that
+        # assemble_scene branches don't each try to write it concurrently.
+        return {"gate2_round": new_gate2_round, "flagged_scene_ids": []}
+
+    return dispatch_scenes_node
+
+
+# ── Node: assemble one scene (Phases A + B + C) ───────────────────────────────
+
+def make_assemble_scene_node(
+    analyst_llm: BaseChatModel,
+    selector_llm: BaseChatModel,
+    cfg,
+):
+    """Return a node that assembles a single scene.
+
+    Invoked via ``Send("assemble_scene", scene_state)`` from the routing
+    function ``_fan_out_scenes`` in graph.py.  ``scene_state`` is a plain
+    dict (not the full EditorState) containing:
+
+        scene            — StoryboardScene dict for this scene
+        segments_by_id   — {segment_id: segment dict}
+        deduped_candidates — {str(scene_id): [CandidateInfo dicts]}
+        gate2_overrides  — {str(scene_id): override dict}
+        top_k_chains     — int
+
+    Returns a partial state update that is merged into the full EditorState
+    via the ``_merge_dict`` reducers on ``narrative_analyses``,
+    ``chains_per_scene``, and ``chain_selections``.
+    """
+    structured_analyst = analyst_llm.with_structured_output(NarrativeAnalysis)
+    structured_selector = selector_llm.with_structured_output(ChainSelection)
+
+    from editor.tools.pathfinding import build_dag, find_chains
+
+    def assemble_scene_node(scene_state: dict) -> dict:
+        scene = scene_state["scene"]
+        segments_by_id: dict[str, dict] = scene_state["segments_by_id"]
+        deduped_candidates: dict = scene_state["deduped_candidates"]
+        gate2_overrides: dict = scene_state.get("gate2_overrides") or {}
+        top_k_chains: int = scene_state["top_k_chains"]
+
+        sid = str(scene["id"])
+        candidates = deduped_candidates.get(sid, [])
+
+        log.info(
+            "assemble_scene: scene %s — Phase A (narrative analysis, %d candidates)",
+            sid, len(candidates),
+        )
+
+        # ── Phase A: Narrative analysis ───────────────────────────────────────
+        candidate_list_text = _format_candidates(candidates, segments_by_id)
+        phase_a_prompt = NARRATIVE_ANALYST_PROMPT.format(
+            scene_id=scene["id"],
+            narration_text=scene.get("narration_segment", ""),
+            scene_description=scene.get("scene_description", ""),
+            keywords=", ".join(scene.get("keywords", [])),
+            candidate_list=candidate_list_text,
+        )
+        analysis: NarrativeAnalysis = structured_analyst.invoke(
+            [HumanMessage(content=phase_a_prompt)]
+        )
+        log.info(
+            "assemble_scene: scene %s — %d buckets, %d assignments, %d pruned",
+            sid, len(analysis.buckets), len(analysis.assignments),
+            len(analysis.pruned_segment_ids),
+        )
+
+        # Guard: if no assignments, skip pathfinding
+        if not analysis.assignments:
+            log.warning("assemble_scene: scene %s has no bucket assignments — skipping", sid)
+            return {
+                "narrative_analyses": {sid: analysis.model_dump()},
+                "chains_per_scene": {sid: []},
+                "chain_selections": {
+                    sid: ChainSelection(
+                        scene_id=scene["id"],
+                        selected_chain_index=0,
+                        reasoning="No assignments returned by narrative analyst; skipping.",
+                    ).model_dump()
+                },
+                }
+
+        # ── Phase B: DAG + k-shortest paths ──────────────────────────────────
+        log.info("assemble_scene: scene %s — Phase B (pathfinding)", sid)
+        dag = build_dag(
+            scene_id=scene["id"],
+            assignments=[a.model_dump() for a in analysis.assignments],
+            segments_by_id=segments_by_id,
+            cfg=cfg,
+        )
+        chains: list[Chain] = find_chains(
+            dag=dag,
+            segments_by_id=segments_by_id,
+            assignments=[a.model_dump() for a in analysis.assignments],
+            scene_id=scene["id"],
+            target_min=analysis.target_duration_min,
+            target_max=analysis.target_duration_max,
+            target_ideal=analysis.target_duration_ideal,
+            top_k=top_k_chains,
+            cfg=cfg,
+        )
+        log.info("assemble_scene: scene %s — %d chains found", sid, len(chains))
+
+        if not chains:
+            return {
+                "narrative_analyses": {sid: analysis.model_dump()},
+                "chains_per_scene": {sid: []},
+                "chain_selections": {
+                    sid: ChainSelection(
+                        scene_id=scene["id"],
+                        selected_chain_index=0,
+                        reasoning="No chains found by pathfinder.",
+                    ).model_dump()
+                },
+                }
+
+        # ── Phase C: Editorial selection ──────────────────────────────────────
+        log.info("assemble_scene: scene %s — Phase C (editorial selection)", sid)
+        chains_text = _format_chains([c.model_dump() for c in chains], segments_by_id)
+        phase_c_prompt = EDITORIAL_SELECTOR_PROMPT.format(
+            scene_id=scene["id"],
+            scene_description=scene.get("scene_description", ""),
+            top_k=len(chains),
+            target_duration_ideal=analysis.target_duration_ideal,
+            target_duration_min=analysis.target_duration_min,
+            target_duration_max=analysis.target_duration_max,
+            chains_formatted=chains_text,
+        )
+        selection: ChainSelection = structured_selector.invoke(
+            [HumanMessage(content=phase_c_prompt)]
+        )
+
+        # Apply gate2 overrides if present
+        override = gate2_overrides.get(sid)
+        if override:
+            selection.selected_chain_index = override.get("chain_index", selection.selected_chain_index)
+            selection.override_notes = override.get("notes", "")
+            log.info("assemble_scene: scene %s — gate2 override applied", sid)
+
+        # Clamp to valid range
+        selection.selected_chain_index = max(
+            0, min(selection.selected_chain_index, len(chains) - 1)
+        )
+        selected_chain = chains[selection.selected_chain_index]
+        selected_seg_ids = [lnk.segment_id for lnk in selected_chain.links]
+        log.info(
+            "assemble_scene: scene %s — selected chain %d, segments: %s",
+            sid, selection.selected_chain_index, selected_seg_ids,
+        )
+
+        return {
+            "narrative_analyses": {sid: analysis.model_dump()},
+            "chains_per_scene": {sid: [c.model_dump() for c in chains]},
+            "chain_selections": {sid: selection.model_dump()},
+        }
+
+    return assemble_scene_node
+
+
+# ── (legacy name kept for any direct callers — delegates to new split nodes) ──
 
 def make_assemble_scenes_node(
     analyst_llm: BaseChatModel,
     selector_llm: BaseChatModel,
     cfg,
 ):
+    """Deprecated: superseded by make_dispatch_scenes_node + make_assemble_scene_node.
+
+    Kept so that external code importing this name does not break immediately.
+    The graph no longer uses this node.
+    """
     structured_analyst = analyst_llm.with_structured_output(NarrativeAnalysis)
     structured_selector = selector_llm.with_structured_output(ChainSelection)
 
@@ -565,6 +745,7 @@ def make_persist_timeline_node(storage, project_name: str):
         BoundaryInfo,
         SceneTimeline,
         StitchDecision,
+        StoryboardMeta,
         TimelineOutput,
         TimelineReview,
         TimelineSegmentEntry,
@@ -647,7 +828,10 @@ def make_persist_timeline_node(storage, project_name: str):
 
         output = TimelineOutput(
             project_name=state["project_name"],
-            storyboard_version=state["storyboard_version"],
+            storyboard=StoryboardMeta(
+                version=state["storyboard_version"],
+                user_brief=state["user_brief"],
+            ),
             scenes=scene_timelines,
             boundaries=[BoundaryInfo.model_validate(b) for b in state.get("boundaries", [])],
             stitch_decisions=[StitchDecision.model_validate(sd) for sd in state.get("stitch_decisions", [])],

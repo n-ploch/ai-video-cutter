@@ -297,6 +297,7 @@ def task_run_editor(
         initial_state = {
             "project_name": project_name,
             "storyboard_version": _detect_storyboard_version(storage, project_name),
+            "user_brief": storyboard_data.user_brief,
             "scenes": [s.model_dump() for s in storyboard_data.scenes],
             "segments": [s.model_dump(mode="json") for s in segments],
             "scene_candidates": {},

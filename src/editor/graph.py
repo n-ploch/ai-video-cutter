@@ -5,14 +5,16 @@ import logging
 from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
 from core.config import EditorConfig
 from core.schemas.editor import TimelineOutput
 from core.storage import ProjectStorage
 from editor.nodes import (
     deduplicate_candidates_node,
-    make_assemble_scenes_node,
+    make_assemble_scene_node,
     make_build_index_node,
+    make_dispatch_scenes_node,
     make_fill_gaps_node,
     make_persist_timeline_node,
     make_retrieve_candidates_node,
@@ -26,6 +28,33 @@ log = logging.getLogger(__name__)
 
 
 # ── Routing ────────────────────────────────────────────────────────────────────
+
+def _fan_out_scenes(state: EditorState) -> list[Send]:
+    """Routing function: fan out one Send("assemble_scene", ...) per scene to process.
+
+    Called by add_conditional_edges after dispatch_scenes_node has run (and
+    incremented gate2_round).  Reads flagged_scene_ids from state (still set
+    at this point — cleared by each assemble_scene node on completion) to
+    determine which scenes need re-assembly.
+    """
+    flagged = state.get("flagged_scene_ids") or []
+    scenes_to_process = [
+        s for s in state["scenes"]
+        if str(s["id"]) in state["deduped_candidates"]
+        and (not flagged or s["id"] in flagged)
+    ]
+    segments_by_id = {s["segment_id"]: s for s in state["segments"]}
+    return [
+        Send("assemble_scene", {
+            "scene": scene,
+            "segments_by_id": segments_by_id,
+            "deduped_candidates": state["deduped_candidates"],
+            "gate2_overrides": state.get("gate2_overrides") or {},
+            "top_k_chains": state["top_k_chains"],
+        })
+        for scene in scenes_to_process
+    ]
+
 
 def _route_after_assemble(cfg: EditorConfig):
     def route(state: EditorState) -> str:
@@ -51,15 +80,15 @@ def _route_review(state: EditorState) -> str:
             state["max_gate2_rounds"],
         )
         return "persist_timeline"
-    return "assemble_scenes"
+    return "dispatch_scenes"
 
 
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
 _EDITOR_INTERRUPT_NODES = [
-    "assemble_scenes",    # Gate 1: post-dedup, pre-assembly
-    "review_timeline",    # Gate 2: post-stitch, human sets flagged_scene_ids
-    "persist_timeline",   # Gate 3: final approval
+    "dispatch_scenes",   # Gate 1: pre-assembly (was "assemble_scenes")
+    "review_timeline",   # Gate 2: post-stitch, human sets flagged_scene_ids
+    "persist_timeline",  # Gate 3: final approval
 ]
 
 
@@ -80,7 +109,8 @@ def _build_uncompiled_graph(
     graph.add_node("retrieve_candidates", make_retrieve_candidates_node(cfg))
     graph.add_node("deduplicate_candidates", deduplicate_candidates_node)
     graph.add_node("fill_gaps", make_fill_gaps_node(cfg))
-    graph.add_node("assemble_scenes", make_assemble_scenes_node(analyst_llm, selector_llm, cfg))
+    graph.add_node("dispatch_scenes", make_dispatch_scenes_node(cfg))
+    graph.add_node("assemble_scene", make_assemble_scene_node(analyst_llm, selector_llm, cfg))
     graph.add_node("stitch_scenes", make_stitch_scenes_node(stitcher_llm, cfg))
     graph.add_node("review_timeline", make_review_timeline_node(reviewer_llm))
     graph.add_node("persist_timeline", make_persist_timeline_node(storage, project_name))
@@ -89,14 +119,19 @@ def _build_uncompiled_graph(
     graph.add_edge("build_embedding_index", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "deduplicate_candidates")
     graph.add_edge("deduplicate_candidates", "fill_gaps")
-    graph.add_edge("fill_gaps", "assemble_scenes")
+    graph.add_edge("fill_gaps", "dispatch_scenes")
 
+    # Fan-out: dispatch_scenes routing fn returns Send objects → parallel assemble_scene
+    graph.add_conditional_edges("dispatch_scenes", _fan_out_scenes, ["assemble_scene"])
+
+    # Fan-in: after all assemble_scene branches complete, route to downstream node
     after_assemble_targets = {"stitch_scenes", "review_timeline", "persist_timeline"}
     graph.add_conditional_edges(
-        "assemble_scenes",
+        "assemble_scene",
         _route_after_assemble(cfg),
         {t: t for t in after_assemble_targets},
     )
+
     after_stitch_targets = {"review_timeline", "persist_timeline"}
     graph.add_conditional_edges(
         "stitch_scenes",
@@ -108,7 +143,7 @@ def _build_uncompiled_graph(
         _route_review,
         {
             "persist_timeline": "persist_timeline",
-            "assemble_scenes": "assemble_scenes",
+            "dispatch_scenes": "dispatch_scenes",
         },
     )
     graph.add_edge("persist_timeline", END)
@@ -216,6 +251,7 @@ def run(
     initial_state: EditorState = {
         "project_name": project_name,
         "storyboard_version": storyboard_version,
+        "user_brief": storyboard_data.user_brief,
         "scenes": [s.model_dump() for s in storyboard_data.scenes],
         "segments": [s.model_dump(mode="json") for s in segments],
         "scene_candidates": {},

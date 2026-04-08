@@ -234,8 +234,9 @@ def test_segmentation_failure_mark_step_never_called(tmp_path):
     mock_storage.mark_step_complete.assert_not_called()
 
 
-def test_vlm_description_failure_described_stays_null(tmp_path):
-    """When VLMStep.run raises, mark_step_complete for 'described' is never called."""
+def test_vlm_global_failure_described_stays_null(tmp_path):
+    """When task_vlm_global raises before dispatching the chord, mark_step_complete
+    for 'described' is never called — the chord never starts, collect never runs."""
     fake_video = tmp_path / "video.mp4"
     fake_video.write_bytes(b"\x00" * 16)
 
@@ -251,13 +252,13 @@ def test_vlm_description_failure_described_stays_null(tmp_path):
         "downsampled_key": "proj/videos/abc123/downsampled.mp4",
     }
 
-    from worker.vlm_tasks import task_vlm_describe
+    from worker.vlm_tasks import task_vlm_global
     with patch("worker.vlm_tasks._get_storage_and_settings", return_value=(mock_storage, mock_settings)):
-        with patch("video.vlm.VLMStep.check_inputs", return_value=None):
-            with patch("video.vlm.VLMStep.run", side_effect=RuntimeError("vlm exploded")):
-                with patch.object(task_vlm_describe, "update_state"):
+        with patch("worker.vlm_tasks.create_vlm_backend", return_value=MagicMock()):
+            with patch("worker.vlm_tasks._analyze_global", side_effect=RuntimeError("vlm exploded")):
+                with patch.object(task_vlm_global, "update_state"):
                     with pytest.raises(RuntimeError, match="vlm exploded"):
-                        task_vlm_describe.run(prev)
+                        task_vlm_global.run(prev)
 
     # mark_step_complete should never have been called for "described"
     for call_args in mock_storage.mark_step_complete.call_args_list:

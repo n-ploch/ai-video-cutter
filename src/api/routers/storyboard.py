@@ -14,6 +14,48 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _check_videos_ready(project, storage: ProjectStorage, project_name: str) -> None:
+    """Raise HTTP 409 if any video pipeline task is still actively running.
+
+    The manifest's ``described`` timestamp is the authoritative completion record.
+    A video is only considered in-progress when the manifest shows it is NOT yet
+    described AND a live Celery task is in STARTED or RETRY state.
+
+    Celery ``PENDING`` is intentionally excluded: it is the default state for any
+    unknown or expired task ID, not a reliable indicator of active work.
+    """
+    from celery.result import AsyncResult
+    from worker.celery_app import app as celery_app
+
+    AGENT_KEYS = {"storyboard_task_id", "storyboard_thread_id", "editor_task_id", "editor_thread_id"}
+
+    manifest = storage._load_manifest(project_name)
+    still_running = []
+    for key, task_id in project.task_ids.items():
+        if key in AGENT_KEYS:
+            continue
+        # key is a video_hash — check manifest first
+        video_hash = key
+        processing = manifest.get("videos", {}).get(video_hash, {}).get("processing", {})
+        if processing.get("described") is not None:
+            # Manifest confirms the full pipeline completed for this video.
+            continue
+        # Manifest says not yet described — check if a task is actively running.
+        # Exclude PENDING: it means "unknown/expired" for Celery, not "queued".
+        if AsyncResult(task_id, app=celery_app).state in ("STARTED", "RETRY"):
+            still_running.append(video_hash)
+
+    if still_running:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Video understanding still in progress for {len(still_running)} video(s) "
+                f"({', '.join(still_running[:3])}). "
+                "Wait for processing to complete before starting storyboard or editing."
+            ),
+        )
+
+
 @router.post("/{project_name}/storyboard", response_model=TaskResponse, status_code=202)
 def trigger_storyboard(
     project_name: str,
@@ -33,6 +75,20 @@ def trigger_storyboard(
         project = storage.get_project(project_name)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    # Guard: block if any video pipeline task is still running.
+    _check_videos_ready(project, storage, project_name)
+
+    # Guard: block if a storyboard task is genuinely in flight right now.
+    # Only STARTED and RETRY indicate an active task — PENDING means unknown/expired
+    # in Celery and must not be treated as "running" (it would permanently block re-runs
+    # after the Redis result TTL expires).
+    existing_sb_id = project.task_ids.get("storyboard_task_id")
+    if existing_sb_id:
+        from celery.result import AsyncResult
+        from worker.celery_app import app as celery_app
+        if AsyncResult(existing_sb_id, app=celery_app).state in ("STARTED", "RETRY"):
+            raise HTTPException(status_code=409, detail="A storyboard task is already running for this project.")
 
     # Verify that descriptions exist before kicking off.
     videos_dir = storage.get_project_path(project_name) / "videos"
