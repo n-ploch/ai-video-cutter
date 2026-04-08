@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from api.deps import get_app_settings, get_storage
 from api.schemas.responses import VideoProcessingStatus, VideoUploadResponse
 from core.config import AppSettings
+from core.project import ProjectStatus
 from core.storage import ProjectStorage, hash_video_file
 
 log = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ async def upload_video(
 
         # Persist task ID in project so the status endpoint can query it.
         project.task_ids[video_hash] = root_task_id
+        project.status = ProjectStatus.analyzing
         storage.save_project(project)
 
         log.info(
