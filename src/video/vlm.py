@@ -176,8 +176,6 @@ class VLMStep(PipelineStep):
                 if desc is not None:
                     descriptions.append(desc)
 
-                if i < len(ctx.segments) - 1:
-                    time.sleep(vlm_cfg.request_delay_s)
 
             # ── Persist results ───────────────────────────────────────────────
             self.storage.save_json(

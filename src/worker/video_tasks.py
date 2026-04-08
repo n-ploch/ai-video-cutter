@@ -195,12 +195,12 @@ def build_video_pipeline_chain(
         result = chain.apply_async()
     """
     from celery import chain as celery_chain
-    from worker.vlm_tasks import task_vlm_describe
+    from worker.vlm_tasks import task_vlm_global
 
     c = celery_chain(
         task_downsample.s(project_name, video_storage_key),
         task_flow_and_segment.s(),
     )
     if include_vlm:
-        c = c | task_vlm_describe.s()
+        c = c | task_vlm_global.s()
     return c
