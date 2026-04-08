@@ -40,9 +40,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ── Video pipeline worker (CPU) ─────────────────────────────────────────────
+  # ── Video pipeline worker (CPU-bound) ──────────────────────────────────────
   # Runs DownsampleStep, OpticalFlowStep, SegmentScenesStep, PersistStep.
-  # concurrency=2 → two videos process in parallel.
+  # Default concurrency=2 (one worker process per video in flight).
+  # Override: CELERY_VIDEO_CONCURRENCY=4
   celery-video:
     build:
       context: .
@@ -55,6 +56,7 @@ services:
       - STORAGE_BACKEND=local
       - STORAGE_ROOT=/app/data/projects
       - CONFIG_PATH=/app/config/default.yaml
+      - CELERY_VIDEO_CONCURRENCY=${CELERY_VIDEO_CONCURRENCY:-2}
     env_file:
       - .env
     depends_on:
@@ -63,14 +65,16 @@ services:
     command: >
       celery -A worker.celery_app worker
         --queues video
-        --concurrency 2
+        --concurrency ${CELERY_VIDEO_CONCURRENCY:-2}
         --loglevel info
         --hostname video@%h
     restart: unless-stopped
 
-  # ── VLM description worker (API/IO-bound) ───────────────────────────────────
+  # ── VLM description worker (I/O-bound) ─────────────────────────────────────
   # Uploads clips to Gemini File API and polls for results.
-  # concurrency=1 → respect Gemini rate limits.
+  # Uses gevent pool so each greenlet blocks on I/O independently.
+  # Rate limiting is enforced at the task level (rate_limit="30/m" on vlm.segment).
+  # Default concurrency=10. Override: CELERY_VLM_CONCURRENCY=20
   celery-vlm:
     build:
       context: .
@@ -83,6 +87,7 @@ services:
       - STORAGE_BACKEND=local
       - STORAGE_ROOT=/app/data/projects
       - CONFIG_PATH=/app/config/default.yaml
+      - CELERY_VLM_CONCURRENCY=${CELERY_VLM_CONCURRENCY:-10}
     env_file:
       - .env
     depends_on:
@@ -91,14 +96,16 @@ services:
     command: >
       celery -A worker.celery_app worker
         --queues vlm
-        --concurrency 1
+        --pool gevent
+        --concurrency ${CELERY_VLM_CONCURRENCY:-10}
         --loglevel info
         --hostname vlm@%h
     restart: unless-stopped
 
-  # ── LangGraph agent worker (LLM API-bound) ──────────────────────────────────
+  # ── LangGraph agent worker (LLM API-bound) ─────────────────────────────────
   # Runs storyboard and editor LangGraph workflows.
-  # concurrency=1 → one long-running agent at a time (avoids OOM from models).
+  # Different projects have no shared state; LLM calls are I/O-bound.
+  # Default concurrency=2. Override: CELERY_AGENTS_CONCURRENCY=4
   celery-agents:
     build:
       context: .
@@ -111,6 +118,7 @@ services:
       - STORAGE_BACKEND=local
       - STORAGE_ROOT=/app/data/projects
       - CONFIG_PATH=/app/config/default.yaml
+      - CELERY_AGENTS_CONCURRENCY=${CELERY_AGENTS_CONCURRENCY:-2}
     env_file:
       - .env
     depends_on:
@@ -119,7 +127,7 @@ services:
     command: >
       celery -A worker.celery_app worker
         --queues agents
-        --concurrency 1
+        --concurrency ${CELERY_AGENTS_CONCURRENCY:-2}
         --loglevel info
         --hostname agents@%h
     restart: unless-stopped
