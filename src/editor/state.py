@@ -1,7 +1,12 @@
 """LangGraph state definition for the timeline assembly agent."""
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Annotated, TypedDict
+
+
+def _merge_dict(a: dict, b: dict) -> dict:
+    """Reducer that merges two dicts — used for parallel Send() fan-out results."""
+    return {**a, **b}
 
 
 class EditorState(TypedDict):
@@ -18,10 +23,12 @@ class EditorState(TypedDict):
     deduped_candidates: dict    # {str(scene_id): [CandidateInfo dicts]}
     gap_warnings: list[str]     # scenes where pool < min_candidates_per_scene
 
-    # ── Stage 5: Per-scene assembly ───────────────────────────────────────────
-    narrative_analyses: dict    # {str(scene_id): NarrativeAnalysis dict}
-    chains_per_scene: dict      # {str(scene_id): [Chain dicts]}
-    chain_selections: dict      # {str(scene_id): ChainSelection dict}
+    # ── Stage 5: Per-scene assembly (parallel Send() fan-out) ─────────────────
+    # Annotated with _merge_dict so parallel assemble_scene branches can each
+    # write their own scene key without overwriting each other's results.
+    narrative_analyses: Annotated[dict, _merge_dict]   # {str(scene_id): NarrativeAnalysis dict}
+    chains_per_scene: Annotated[dict, _merge_dict]     # {str(scene_id): [Chain dicts]}
+    chain_selections: Annotated[dict, _merge_dict]     # {str(scene_id): ChainSelection dict}
 
     # ── Stage 6: Stitching ────────────────────────────────────────────────────
     boundaries: list[dict]      # [BoundaryInfo dicts]

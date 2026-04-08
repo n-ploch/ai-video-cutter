@@ -50,7 +50,8 @@ class VlmConfig(BaseModel):
     model: str = "gemini-2.0-flash"
     temperature: float = 0.3
     gemini_api_key: str | None = None  # falls back to GEMINI_API_KEY env var
-    request_delay_s: float = 2.0       # rate-limit pause between segment API calls
+    request_delay_s: float = 2.0       # rate-limit pause between segment API calls (CLI/VLMStep only)
+    segment_rate_limit: str = "30/m"   # Celery rate limit for vlm.segment tasks
 
 
 class AgentLLMConfig(BaseModel):
