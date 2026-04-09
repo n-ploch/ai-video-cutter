@@ -17,11 +17,63 @@ import os
 from contextlib import contextmanager
 from typing import Callable
 
+from langchain_core.callbacks import BaseCallbackHandler
+
 from worker.celery_app import app
 
 log = logging.getLogger(__name__)
 
 _REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+# ── Node → UI phase mapping ─────────────────────────────────────────────────
+
+_EDITOR_PHASE_MAP: dict[str, str] = {
+    "build_embedding_index": "fetching_candidates",
+    "retrieve_candidates": "fetching_candidates",
+    "deduplicate_candidates": "fetching_candidates",
+    "fill_gaps": "fetching_candidates",
+    "dispatch_scenes": "assembling_scenes",
+    "assemble_scene": "assembling_scenes",
+    "stitch_scenes": "stitching",
+    "review_timeline": "reviewing",
+    "persist_timeline": "persisting",
+}
+
+_STORYBOARD_PHASE_MAP: dict[str, str] = {
+    "story_writer": "writing_story",
+    "story_judge": "judging_story",
+    "narrator": "creating_narration",
+    "director": "directing_scenes",
+    "judge": "final_review",
+    "persist": "persisting",
+}
+
+
+class CeleryProgressHandler(BaseCallbackHandler):
+    """Reports LangGraph node transitions as Celery task progress.
+
+    Listens for ``on_chain_start`` events whose ``serialized["name"]`` matches
+    a graph node, maps it to a user-facing phase label, and calls
+    ``celery_task.update_state()`` so the frontend can poll for granular
+    progress via ``GET /api/v1/status/{task_id}``.
+    """
+
+    def __init__(self, celery_task, project_name: str, phase_map: dict[str, str]) -> None:  # type: ignore[override]
+        super().__init__()
+        self._celery_task = celery_task
+        self._project_name = project_name
+        self._phase_map = phase_map
+        self._last_phase: str | None = None
+
+    def on_chain_start(self, serialized: dict, inputs, **kwargs) -> None:  # type: ignore[override]
+        node_name = serialized.get("name", "")
+        phase = self._phase_map.get(node_name)
+        if phase and phase != self._last_phase:
+            self._last_phase = phase
+            self._celery_task.update_state(
+                state="STARTED",
+                meta={"current_step": phase, "project": self._project_name},
+            )
 
 
 def _get_storage_and_settings(project_name: str):
@@ -220,13 +272,15 @@ def task_run_storyboard(
 
     handler = get_langfuse_handler(session_id=project_name, tags=["storyboard"])
     metadata = get_langfuse_metadata(session_id=project_name, trace_name="storyboard", tags=["storyboard"])
+    progress_handler = CeleryProgressHandler(self, project_name, _STORYBOARD_PHASE_MAP)
+    callbacks = [cb for cb in [handler, progress_handler] if cb]
     result = _invoke_and_check(
         build_compiled=lambda cp: build_graph_with_checkpointer(cfg, storage, project_name, cp, human_in_the_loop),
         initial_state=initial_state,
         project_name=project_name,
         effective_thread_id=effective_thread_id,
         task_name="task_run_storyboard",
-        callbacks=[handler] if handler else None,
+        callbacks=callbacks or None,
         metadata=metadata,
     )
     flush_langfuse()
@@ -323,6 +377,8 @@ def task_run_editor(
 
     handler = get_langfuse_handler(session_id=project_name, tags=["editor"])
     metadata = get_langfuse_metadata(session_id=project_name, trace_name="editor", tags=["editor"])
+    progress_handler = CeleryProgressHandler(self, project_name, _EDITOR_PHASE_MAP)
+    callbacks = [cb for cb in [handler, progress_handler] if cb]
     result = _invoke_and_check(
         build_compiled=lambda cp: build_graph_with_checkpointer(cfg, storage, project_name, cp, human_in_the_loop),
         initial_state=initial_state,
@@ -330,7 +386,7 @@ def task_run_editor(
         effective_thread_id=effective_thread_id,
         task_name="task_run_editor",
         gate_overrides=gate_overrides,
-        callbacks=[handler] if handler else None,
+        callbacks=callbacks or None,
         metadata=metadata,
     )
     flush_langfuse()
