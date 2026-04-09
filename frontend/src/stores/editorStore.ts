@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { TimelineOutput } from '../types/timeline'
 import type { TimelineVersionInfo } from '../types/versions'
 import * as editorApi from '../api/editor'
-import { getTaskStatus } from '../api/status'
+import { getTaskStatus, getProjectStatus } from '../api/status'
 
 export type EditorPhase =
   | 'idle'
@@ -35,6 +35,12 @@ interface EditorStore {
   fetchVersions: (project: string) => Promise<void>
   selectVersion: (project: string, version: number | null) => Promise<void>
   setSelectedStoryboardVersion: (version: number | null) => void
+  /**
+   * Re-hydrate isRunning/taskId/phase from the backend project status.
+   * Called on mount to recover a running task after page refresh or tab navigation.
+   * Safe to call when already running — skips if isRunning is already true.
+   */
+  hydrateTaskState: (project: string) => Promise<void>
   pollStatus: (project: string) => Promise<boolean>
   reset: () => void
 }
@@ -129,6 +135,19 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setSelectedStoryboardVersion: (version) => {
     set({ selectedStoryboardVersion: version })
+  },
+
+  hydrateTaskState: async (project) => {
+    if (get().isRunning) return
+    try {
+      const status = await getProjectStatus(project)
+      const ed = status.editor
+      if (ed.task_id && (ed.celery_state === 'STARTED' || ed.celery_state === 'RETRY')) {
+        set({ isRunning: true, taskId: ed.task_id, phase: 'fetching_candidates' })
+      }
+    } catch {
+      // Ignore
+    }
   },
 
   pollStatus: async (project) => {
