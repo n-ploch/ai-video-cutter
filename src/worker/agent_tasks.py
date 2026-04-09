@@ -66,9 +66,8 @@ class CeleryProgressHandler(BaseCallbackHandler):
         self._last_phase: str | None = None
 
     def on_chain_start(self, serialized: dict | None, inputs, **kwargs) -> None:  # type: ignore[override]
-        if not serialized:
-            return
-        node_name = serialized.get("name", "")
+        # LangGraph passes serialized=None and puts the node name in kwargs['name']
+        node_name = (serialized or {}).get("name") or kwargs.get("name", "")
         phase = self._phase_map.get(node_name)
         if phase and phase != self._last_phase:
             self._last_phase = phase
