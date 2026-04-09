@@ -129,7 +129,9 @@ export const useStoryboardStore = create<StoryboardStore>((set, get) => ({
 
   pollStatus: async (project) => {
     const { taskId } = get()
-    if (!taskId) return true
+    // No task ID yet — triggerStoryboard is still awaiting the API response.
+    // Return false so polling keeps running rather than fetching stale data.
+    if (!taskId) return false
     try {
       const res = await getTaskStatus(taskId)
       if (res.status === 'SUCCESS') {
