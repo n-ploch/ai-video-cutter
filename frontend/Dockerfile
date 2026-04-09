@@ -1,3 +1,20 @@
+# ── Stage 0: dev (hot reload via volume mount) ────────────────────────────────
+# Source is NOT copied here — mount ./frontend:/app at runtime.
+# node_modules are installed into the image and preserved via a named volume
+# so the host directory doesn't shadow them.
+#
+# Usage (via docker-compose.dev.yml):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build frontend
+FROM node:22-slim AS dev
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+EXPOSE 5173
+CMD ["npm", "run", "dev"]
+
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 FROM node:22-slim AS build
 
