@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import get_storage
 from api.schemas.requests import StoryboardResumeRequest, StoryboardTriggerRequest
@@ -148,23 +148,60 @@ def resume_storyboard(
     return TaskResponse(task_id=result.id, status="queued")
 
 
-@router.get("/{project_name}/storyboard")
-def get_storyboard(
+@router.get("/{project_name}/storyboard/versions")
+def list_storyboard_versions(
     project_name: str,
     storage: ProjectStorage = Depends(get_storage),
 ):
-    """Return the latest storyboard output for a project."""
+    """Return metadata for all storyboard versions of a project.
+
+    Each entry includes ``version``, ``created_at``, and ``brief_snippet``
+    (first 120 characters of the user brief).
+    """
     try:
         storage.get_project(project_name)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
 
-    storyboard_path = storage.get_project_path(project_name) / "storyboard" / "latest.json"
-    if not storyboard_path.exists():
-        raise HTTPException(status_code=404, detail="No storyboard found. Run the storyboard agent first.")
+    entries = storage.list_versioned(project_name, "storyboard")
+    result = []
+    for entry in entries:
+        try:
+            data = storage.load_json(project_name, f"storyboard/v{entry['version']}.json")
+            brief = (data.get("user_brief") or "")[:120] or None
+        except Exception:
+            brief = None
+        result.append({**entry, "brief_snippet": brief})
+    return result
+
+
+@router.get("/{project_name}/storyboard")
+def get_storyboard(
+    project_name: str,
+    version: int | None = Query(default=None),
+    storage: ProjectStorage = Depends(get_storage),
+):
+    """Return a storyboard output for a project.
+
+    If ``version`` is provided, load that specific version (e.g. ``?version=2``).
+    Otherwise returns the latest storyboard.
+    """
+    try:
+        storage.get_project(project_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    if version is not None:
+        path = f"storyboard/v{version}.json"
+        if not (storage.get_project_path(project_name) / "storyboard" / f"v{version}.json").exists():
+            raise HTTPException(status_code=404, detail=f"Storyboard version {version} not found.")
+    else:
+        path = "storyboard/latest.json"
+        if not (storage.get_project_path(project_name) / "storyboard" / "latest.json").exists():
+            raise HTTPException(status_code=404, detail="No storyboard found. Run the storyboard agent first.")
 
     from core.schemas.storyboard import StoryboardOutput
-    return storage.load_json(project_name, "storyboard/latest.json", schema=StoryboardOutput)
+    return storage.load_json(project_name, path, schema=StoryboardOutput)
 
 
 def _inject_storyboard_feedback(thread_id: str, feedback: str) -> None:

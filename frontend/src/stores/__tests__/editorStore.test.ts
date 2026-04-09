@@ -5,6 +5,7 @@ import { phaseIndex, PHASE_LABELS, useEditorStore, type EditorPhase } from '../e
 vi.mock('../../api/editor', () => ({
   triggerEditor: vi.fn(),
   getTimeline: vi.fn(),
+  getEditorVersions: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('../../api/status', () => ({
   getTaskStatus: vi.fn(),
@@ -92,7 +93,7 @@ describe('editorStore', () => {
   })
 
   it('pollStatus returns false (keep polling) when taskId is null', async () => {
-    const done = await useEditorStore.getState().pollStatus()
+    const done = await useEditorStore.getState().pollStatus('my_project')
     expect(done).toBe(false)
   })
 
@@ -106,7 +107,7 @@ describe('editorStore', () => {
       error: null,
     })
 
-    const done = await useEditorStore.getState().pollStatus()
+    const done = await useEditorStore.getState().pollStatus('my_project')
 
     expect(done).toBe(false)
     expect(useEditorStore.getState().phase).toBe('assembling_scenes')
@@ -122,7 +123,7 @@ describe('editorStore', () => {
       error: null,
     })
 
-    const done = await useEditorStore.getState().pollStatus()
+    const done = await useEditorStore.getState().pollStatus('my_project')
 
     expect(done).toBe(true)
     expect(useEditorStore.getState().phase).toBe('done')
@@ -139,7 +140,7 @@ describe('editorStore', () => {
       error: 'Out of memory',
     })
 
-    const done = await useEditorStore.getState().pollStatus()
+    const done = await useEditorStore.getState().pollStatus('my_project')
 
     expect(done).toBe(true)
     expect(useEditorStore.getState().isRunning).toBe(false)

@@ -16,9 +16,10 @@ const ACTIVE_PHASES: EditorPhase[] = [
 
 interface Props {
   projectName: string
+  storyboardVersion: number | null
 }
 
-export default function StartEditingButton({ projectName }: Props) {
+export default function StartEditingButton({ projectName, storyboardVersion }: Props) {
   const { isRunning, phase, error, triggerEditor } = useEditorStore()
 
   if (error) {
@@ -28,7 +29,7 @@ export default function StartEditingButton({ projectName }: Props) {
           {error}
         </div>
         <button
-          onClick={() => triggerEditor(projectName)}
+          onClick={() => triggerEditor(projectName, storyboardVersion)}
           className="w-full py-3 px-6 bg-accent text-white font-semibold rounded-xl hover:bg-accent/90 transition-colors"
         >
           Retry
@@ -91,7 +92,7 @@ export default function StartEditingButton({ projectName }: Props) {
 
   return (
     <button
-      onClick={() => triggerEditor(projectName)}
+      onClick={() => triggerEditor(projectName, storyboardVersion)}
       className="w-full py-3 px-6 bg-accent text-white font-semibold rounded-xl hover:bg-accent/90 transition-colors"
     >
       Start Editing

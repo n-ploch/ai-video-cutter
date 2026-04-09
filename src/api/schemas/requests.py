@@ -21,6 +21,7 @@ class StoryboardResumeRequest(BaseModel):
 
 class EditorTriggerRequest(BaseModel):
     human_in_the_loop: bool = False
+    storyboard_version: int | None = None
 
 
 class EditorResumeRequest(BaseModel):

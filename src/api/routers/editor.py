@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import get_storage
 from api.schemas.requests import EditorResumeRequest, EditorTriggerRequest
@@ -96,12 +96,13 @@ def trigger_editor(
     result = task_run_editor.delay(
         project_name,
         human_in_the_loop=body.human_in_the_loop or None,
+        storyboard_version=body.storyboard_version,
     )
 
     project.task_ids["editor_task_id"] = result.id
     storage.save_project(project)
 
-    log.info("trigger_editor: project=%s task_id=%s", project_name, result.id)
+    log.info("trigger_editor: project=%s task_id=%s storyboard_version=%s", project_name, result.id, body.storyboard_version)
     return TaskResponse(task_id=result.id, status="queued")
 
 
@@ -139,20 +140,61 @@ def resume_editor(
     return TaskResponse(task_id=result.id, status="queued")
 
 
-@router.get("/{project_name}/editor")
-def get_timeline(
+@router.get("/{project_name}/editor/versions")
+def list_editor_versions(
     project_name: str,
     storage: ProjectStorage = Depends(get_storage),
 ):
-    """Return the latest timeline output for a project."""
+    """Return metadata for all timeline versions of a project.
+
+    Each entry includes ``version``, ``created_at``, ``storyboard_version``,
+    and ``brief_snippet`` (first 120 chars of the user brief from the storyboard
+    reference embedded in the timeline).
+    """
     try:
         storage.get_project(project_name)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
 
-    timeline_path = storage.get_project_path(project_name) / "timeline" / "latest.json"
-    if not timeline_path.exists():
-        raise HTTPException(status_code=404, detail="No timeline found. Run the editor agent first.")
+    entries = storage.list_versioned(project_name, "timeline")
+    result = []
+    for entry in entries:
+        try:
+            data = storage.load_json(project_name, f"timeline/v{entry['version']}.json")
+            sb = data.get("storyboard") or {}
+            storyboard_version = sb.get("version")
+            brief = (sb.get("user_brief") or "")[:120] or None
+        except Exception:
+            storyboard_version = None
+            brief = None
+        result.append({**entry, "storyboard_version": storyboard_version, "brief_snippet": brief})
+    return result
+
+
+@router.get("/{project_name}/editor")
+def get_timeline(
+    project_name: str,
+    version: int | None = Query(default=None),
+    storage: ProjectStorage = Depends(get_storage),
+):
+    """Return a timeline output for a project.
+
+    If ``version`` is provided, load that specific version (e.g. ``?version=2``).
+    Otherwise returns the latest timeline.
+    """
+    try:
+        storage.get_project(project_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+
+    if version is not None:
+        path = f"timeline/v{version}.json"
+        if not (storage.get_project_path(project_name) / "timeline" / f"v{version}.json").exists():
+            raise HTTPException(status_code=404, detail=f"Timeline version {version} not found.")
+    else:
+        path = "timeline/latest.json"
+        if not (storage.get_project_path(project_name) / "timeline" / "latest.json").exists():
+            raise HTTPException(status_code=404, detail="No timeline found. Run the editor agent first.")
 
     from core.schemas.editor import TimelineOutput
-    return storage.load_json(project_name, "timeline/latest.json", schema=TimelineOutput)
+    return storage.load_json(project_name, path, schema=TimelineOutput)

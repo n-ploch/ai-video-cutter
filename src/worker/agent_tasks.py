@@ -303,6 +303,7 @@ def task_run_editor(
     thread_id: str | None = None,
     gate_overrides: dict | None = None,
     human_in_the_loop: bool | None = None,
+    storyboard_version: int | None = None,
 ) -> dict:
     """Run (or resume) the editor LangGraph agent.
 
@@ -345,13 +346,23 @@ def task_run_editor(
                 continue
             segments.extend(build_combined_view(bases, descs))
 
+        sb_path = (
+            f"storyboard/v{storyboard_version}.json"
+            if storyboard_version is not None
+            else "storyboard/latest.json"
+        )
         storyboard_data: StoryboardOutput = storage.load_json(
-            project_name, "storyboard/latest.json", schema=StoryboardOutput
+            project_name, sb_path, schema=StoryboardOutput
+        )
+        effective_sb_version = (
+            storyboard_version
+            if storyboard_version is not None
+            else _detect_storyboard_version(storage, project_name)
         )
 
         initial_state = {
             "project_name": project_name,
-            "storyboard_version": _detect_storyboard_version(storage, project_name),
+            "storyboard_version": effective_sb_version,
             "user_brief": storyboard_data.user_brief,
             "scenes": [s.model_dump() for s in storyboard_data.scenes],
             "segments": [s.model_dump(mode="json") for s in segments],

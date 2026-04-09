@@ -76,14 +76,8 @@ export default function VideoDetail({ video, project, onClose }: Props) {
         src={videoSrc}
         startTime={startTime}
         endTime={endTime}
-        onTimeUpdate={(t) => {
-          setCurrentTime(t)
-          // Capture duration from loaded metadata via the video element
-          const el = document.querySelector<HTMLVideoElement>(`video[src="${videoSrc}"]`)
-          if (el && el.duration && el.duration !== videoDuration) {
-            setVideoDuration(el.duration)
-          }
-        }}
+        onTimeUpdate={setCurrentTime}
+        onDurationChange={setVideoDuration}
       />
 
       {/* Segment timeline */}
