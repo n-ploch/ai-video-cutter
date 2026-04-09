@@ -7,7 +7,7 @@ import BriefTile from './BriefTile'
 import StoryTile from './StoryTile'
 import SceneTile from './SceneTile'
 import UseStoryboardButton from './UseStoryboardButton'
-import VersionSidebar from '../common/VersionSidebar'
+import StoryboardVersionSidebar from './StoryboardVersionSidebar'
 
 export default function StoryboardPage() {
   const currentProject = useProjectStore((s) => s.currentProject)
@@ -22,22 +22,26 @@ export default function StoryboardPage() {
     triggerStoryboard,
     fetchStoryboard,
     fetchVersions,
+    hydrateTaskState,
     selectVersion,
     startNew,
     pollStatus,
     reset,
   } = useStoryboardStore()
 
-  // Reset on project change, load latest storyboard + version list
+  // On project change: reset, load latest storyboard + versions, recover active task
   useEffect(() => {
     reset()
     if (currentProject) {
       fetchStoryboard(currentProject)
       fetchVersions(currentProject)
+      hydrateTaskState(currentProject)
     }
-  }, [currentProject, fetchStoryboard, fetchVersions, reset])
+  }, [currentProject, fetchStoryboard, fetchVersions, hydrateTaskState, reset])
 
-  // Poll while running
+  // Poll while a task is running — automatically starts/stops as isRunning changes.
+  // usePolling re-runs its effect whenever shouldStop changes, so hydrating
+  // isRunning from false → true (page refresh) will start polling immediately.
   usePolling(
     async () => {
       if (!currentProject) return
@@ -55,6 +59,22 @@ export default function StoryboardPage() {
     triggerStoryboard(currentProject, brief)
   }
 
+  const handleCreateNew = () => {
+    startNew()
+    // selectVersion sets selectedVersion = null and clears viewingStoryboard
+    // startNew already does this, but calling it ensures the sidebar deselects
+  }
+
+  const handleSelectVersion = (v: number | null) => {
+    if (!currentProject) return
+    if (v === null) {
+      // Return to active view without clearing active state
+      selectVersion(currentProject, null)
+    } else {
+      selectVersion(currentProject, v)
+    }
+  }
+
   if (!currentProject) {
     return (
       <div className="flex items-center justify-center h-full text-muted">
@@ -63,37 +83,46 @@ export default function StoryboardPage() {
     )
   }
 
-  // What to display: frozen version or active/latest
-  const displayedStoryboard = selectedVersion !== null ? viewingStoryboard : storyboard
-  const brief = displayedStoryboard?.user_brief ?? submittedBrief
+  // What to display in the main content area
+  const isActiveView = selectedVersion === null
+  const displayedStoryboard = isActiveView ? storyboard : viewingStoryboard
+  const brief = displayedStoryboard?.user_brief ?? (isActiveView ? submittedBrief : null)
 
   return (
     <div className="h-full flex overflow-hidden">
-      {/* Version history sidebar */}
-      <VersionSidebar
-        label="Storyboard"
+      <StoryboardVersionSidebar
         versions={versions}
         selectedVersion={selectedVersion}
-        isActiveRunning={isRunning}
-        onSelectVersion={(v) => selectVersion(currentProject, v)}
-        onNew={startNew}
+        isRunning={isRunning}
+        onCreateNew={handleCreateNew}
+        onSelectVersion={handleSelectVersion}
       />
 
-      {/* Main content */}
       <div className="flex-1 overflow-auto">
         <div className="max-w-3xl mx-auto px-6 py-4 space-y-4">
-          {/* Chat input only when viewing active/latest */}
-          {selectedVersion === null && (
-            <ChatInput
-              onSubmit={handleSubmit}
-              disabled={isRunning}
-              submitted={!!submittedBrief || !!storyboard}
-            />
-          )}
 
-          {error && selectedVersion === null && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
-              {error}
+          {isActiveView ? (
+            // ── Active view: chat input + live generation progress ──
+            <>
+              <ChatInput
+                onSubmit={handleSubmit}
+                disabled={isRunning}
+                submitted={!!submittedBrief || !!storyboard}
+              />
+
+              {error && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
+                  {error}
+                </div>
+              )}
+            </>
+          ) : (
+            // ── Past version view: read-only header ──
+            <div className="flex items-center gap-2 py-2 text-sm text-muted">
+              <span className="font-mono font-semibold text-foreground">
+                v{selectedVersion}
+              </span>
+              <span>— read-only</span>
             </div>
           )}
 
@@ -116,11 +145,14 @@ export default function StoryboardPage() {
             </>
           )}
 
-          <UseStoryboardButton
-            isRunning={isRunning && selectedVersion === null}
-            hasStoryboard={!!displayedStoryboard}
-            viewedVersion={selectedVersion}
-          />
+          {/* Use Storyboard button — shown whenever there's content to use */}
+          {displayedStoryboard && (
+            <UseStoryboardButton
+              isRunning={isRunning && isActiveView}
+              hasStoryboard={!!displayedStoryboard}
+              viewedVersion={selectedVersion}
+            />
+          )}
         </div>
       </div>
     </div>

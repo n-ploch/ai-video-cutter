@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { StoryboardOutput } from '../types/storyboard'
 import type { StoryboardVersionInfo } from '../types/versions'
 import * as storyboardApi from '../api/storyboard'
-import { getTaskStatus } from '../api/status'
+import { getTaskStatus, getProjectStatus } from '../api/status'
 
 interface StoryboardStore {
   // Active/latest storyboard (polled during generation, loaded on mount)
@@ -14,15 +14,26 @@ interface StoryboardStore {
 
   // Version history
   versions: StoryboardVersionInfo[]
-  selectedVersion: number | null       // null = show active/latest
+  selectedVersion: number | null        // null = active/create-new view
   viewingStoryboard: StoryboardOutput | null  // loaded when selectedVersion is set
 
   triggerStoryboard: (project: string, brief: string) => Promise<void>
   fetchStoryboard: (project: string) => Promise<void>
   fetchVersions: (project: string) => Promise<void>
+  /**
+   * Re-hydrate isRunning/taskId from the backend project status.
+   * Called on mount to recover running task state after a page refresh.
+   * Safe to call when already running — will not overwrite state.
+   */
+  hydrateTaskState: (project: string) => Promise<void>
   selectVersion: (project: string, version: number | null) => Promise<void>
+  /**
+   * Enter the "create new" view: clears active storyboard/brief so the
+   * chat input appears fresh. Does NOT clear versions or selectedVersion
+   * directly — the caller should also call selectVersion(project, null).
+   */
   startNew: () => void
-  pollStatus: (project: string) => Promise<boolean> // returns true when done
+  pollStatus: (project: string) => Promise<boolean>
   reset: () => void
 }
 
@@ -67,7 +78,26 @@ export const useStoryboardStore = create<StoryboardStore>((set, get) => ({
       const versions = await storyboardApi.getStoryboardVersions(project)
       set({ versions })
     } catch {
-      // Ignore — no versions yet
+      // No versions yet
+    }
+  },
+
+  hydrateTaskState: async (project) => {
+    // Don't overwrite an already-known running state (same session, tab navigation).
+    if (get().isRunning) return
+    try {
+      const status = await getProjectStatus(project)
+      const sb = status.storyboard
+      // Only STARTED and RETRY mean the task is genuinely in flight.
+      // PENDING is Celery's default for unknown/expired task IDs and must be ignored.
+      if (
+        sb.task_id &&
+        (sb.celery_state === 'STARTED' || sb.celery_state === 'RETRY')
+      ) {
+        set({ isRunning: true, taskId: sb.task_id })
+      }
+    } catch {
+      // Ignore — backend may not be reachable yet
     }
   },
 
@@ -85,12 +115,15 @@ export const useStoryboardStore = create<StoryboardStore>((set, get) => ({
   },
 
   startNew: () => {
+    // Clear active content so chat input appears blank.
+    // selectedVersion is intentionally NOT set here — the caller pairs this
+    // with selectVersion(project, null) so the sidebar also deselects.
     set({
-      selectedVersion: null,
-      viewingStoryboard: null,
       storyboard: null,
       submittedBrief: null,
       error: null,
+      viewingStoryboard: null,
+      selectedVersion: null,
     })
   },
 
@@ -101,7 +134,6 @@ export const useStoryboardStore = create<StoryboardStore>((set, get) => ({
       const res = await getTaskStatus(taskId)
       if (res.status === 'SUCCESS') {
         set({ isRunning: false })
-        // Refresh versions list so the new version appears in sidebar
         get().fetchVersions(project)
         return true
       }
