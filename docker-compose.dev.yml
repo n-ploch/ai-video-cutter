@@ -1,8 +1,29 @@
 # Development overrides — disables Redis persistence so queued tasks do not
-# survive a Ctrl+C / docker compose restart.
+# survive a Ctrl+C / docker compose restart, and runs the frontend with
+# Vite's dev server (HMR) instead of a pre-built nginx image.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 services:
   redis:
     command: redis-stack-server --save "" --appendonly no
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount source for hot reload; named volume keeps image node_modules intact
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    environment:
+      - API_TARGET=http://api:8000
+      - VITE_DEV_MODE=true
+    depends_on:
+      - api
+
+volumes:
+  frontend_node_modules:

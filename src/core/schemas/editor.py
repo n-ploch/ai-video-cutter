@@ -145,7 +145,7 @@ class SceneTimeline(BaseModel):
 class TimelineOutput(BaseModel):
     """Versioned output of the timeline assembly agent."""
     project_name: str
-    storyboard: StoryboardMeta
+    storyboard: StoryboardMeta | None = None
     scenes: list[SceneTimeline]
     boundaries: list[BoundaryInfo]
     stitch_decisions: list[StitchDecision]

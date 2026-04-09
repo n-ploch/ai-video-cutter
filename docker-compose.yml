@@ -132,6 +132,17 @@ services:
         --hostname agents@%h
     restart: unless-stopped
 
+  # ── Frontend (React SPA served via nginx) ─────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   # ── Optional: Flower task monitor ──────────────────────────────────────────
   # Uncomment to enable the Celery monitoring dashboard at http://localhost:5555
   flower:
