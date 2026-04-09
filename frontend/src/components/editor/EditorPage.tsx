@@ -1,26 +1,36 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../../stores/projectStore'
 import { useStoryboardStore } from '../../stores/storyboardStore'
 import { useEditorStore } from '../../stores/editorStore'
 import { usePolling } from '../../hooks/usePolling'
 import ScenePanel from './ScenePanel'
 import StartEditingButton from './StartEditingButton'
+import EditorPreview from './EditorPreview'
+import EditorTimeline from './EditorTimeline'
 
 export default function EditorPage() {
   const currentProject = useProjectStore((s) => s.currentProject)
   const storyboard = useStoryboardStore((s) => s.storyboard)
   const fetchStoryboard = useStoryboardStore((s) => s.fetchStoryboard)
 
-  const { timeline, isRunning, phase, fetchTimeline, pollStatus, reset } = useEditorStore()
+  const { timeline, isRunning, fetchTimeline, pollStatus, reset } = useEditorStore()
+
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0)
 
   // Reset and load on project change
   useEffect(() => {
     reset()
+    setCurrentSegmentIndex(0)
     if (currentProject) {
       fetchStoryboard(currentProject)
       fetchTimeline(currentProject)
     }
   }, [currentProject, fetchStoryboard, fetchTimeline, reset])
+
+  // Reset segment index when timeline loads
+  useEffect(() => {
+    setCurrentSegmentIndex(0)
+  }, [timeline])
 
   // Poll while running
   usePolling(
@@ -63,41 +73,39 @@ export default function EditorPage() {
           />
         </div>
 
-        {/* Right: preview placeholder + start button (60%) */}
-        <div className="flex-1 flex flex-col gap-4 p-6">
-          {/* Preview area */}
-          <div className="flex-1 bg-black rounded-xl flex items-center justify-center text-muted text-sm">
-            {phase === 'done' && timeline
-              ? 'Preview coming in Phase 6'
-              : 'Preview will appear after timeline is built'}
+        {/* Right: preview + start button (60%) */}
+        <div className="flex-1 flex flex-col gap-4 p-4 min-h-0">
+          <div className="flex-1 min-h-0">
+            {timeline ? (
+              <EditorPreview
+                project={currentProject}
+                timeline={timeline}
+                currentIndex={currentSegmentIndex}
+                onIndexChange={setCurrentSegmentIndex}
+              />
+            ) : (
+              <div className="w-full h-full bg-black rounded-xl flex items-center justify-center text-muted text-sm">
+                Preview will appear after timeline is built
+              </div>
+            )}
           </div>
 
-          {/* Start editing / progress */}
           <StartEditingButton projectName={currentProject} />
         </div>
       </div>
 
-      {/* Bottom: timeline strip placeholder */}
-      <div className="h-24 border-t border-border bg-bg-secondary flex items-center px-4">
+      {/* Bottom: interactive timeline (full width, fixed height) */}
+      <div className="h-20 border-t border-border bg-bg-secondary shrink-0">
         {timeline ? (
-          <div className="flex gap-1 overflow-x-auto w-full">
-            {timeline.scenes.map((scene) => (
-              <div
-                key={scene.scene_id}
-                className="shrink-0 h-14 rounded bg-accent/20 border border-accent/40 flex items-center justify-center px-2"
-                style={{
-                  width: `${Math.max(60, (scene.total_duration / timeline.total_duration) * 100)}%`,
-                  maxWidth: '200px',
-                }}
-              >
-                <span className="text-xs text-accent font-mono truncate">
-                  S{scene.scene_id}
-                </span>
-              </div>
-            ))}
-          </div>
+          <EditorTimeline
+            timeline={timeline}
+            currentIndex={currentSegmentIndex}
+            onIndexChange={setCurrentSegmentIndex}
+          />
         ) : (
-          <p className="text-xs text-muted">Timeline will appear here after assembly</p>
+          <div className="flex items-center justify-center h-full">
+            <p className="text-xs text-muted">Timeline will appear here after assembly</p>
+          </div>
         )}
       </div>
     </div>
