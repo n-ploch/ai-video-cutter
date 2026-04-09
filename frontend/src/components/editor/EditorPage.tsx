@@ -14,7 +14,7 @@ export default function EditorPage() {
   const storyboard = useStoryboardStore((s) => s.storyboard)
   const fetchStoryboard = useStoryboardStore((s) => s.fetchStoryboard)
 
-  const { timeline, isRunning, phase, fetchTimeline, pollStatus, reset } = useEditorStore()
+  const { timeline, isRunning, phase, runId, fetchTimeline, pollStatus, reset } = useEditorStore()
 
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0)
 
@@ -71,6 +71,7 @@ export default function EditorPage() {
             storyboard={storyboard}
             timeline={timeline}
             isRunning={isRunning}
+            runId={runId}
           />
         </div>
 

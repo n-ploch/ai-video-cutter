@@ -6,9 +6,10 @@ interface Props {
   storyboard: StoryboardOutput
   timeline: TimelineOutput | null
   isRunning: boolean
+  runId: number
 }
 
-export default function ScenePanel({ storyboard, timeline, isRunning }: Props) {
+export default function ScenePanel({ storyboard, timeline, isRunning, runId }: Props) {
   const sceneMap = new Map(timeline?.scenes.map((s) => [s.scene_id, s]) ?? [])
 
   return (
@@ -25,7 +26,7 @@ export default function ScenePanel({ storyboard, timeline, isRunning }: Props) {
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {storyboard.scenes.map((scene) => (
           <ScenePanelItem
-            key={scene.id}
+            key={`${scene.id}-${runId}`}
             storyboardScene={scene}
             timelineScene={sceneMap.get(scene.id)}
             isRunning={isRunning}

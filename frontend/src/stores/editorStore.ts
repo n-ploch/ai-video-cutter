@@ -18,6 +18,7 @@ interface EditorStore {
   isRunning: boolean
   phase: EditorPhase
   error: string | null
+  runId: number
 
   triggerEditor: (project: string) => Promise<void>
   fetchTimeline: (project: string) => Promise<void>
@@ -55,9 +56,19 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   isRunning: false,
   phase: 'idle',
   error: null,
+  runId: 0,
 
   triggerEditor: async (project) => {
-    set({ isRunning: true, error: null, phase: 'fetching_candidates', timeline: null })
+    // Clear taskId immediately so pollStatus won't act on the previous task
+    // during the async gap before the new task ID arrives.
+    set((s) => ({
+      isRunning: true,
+      error: null,
+      phase: 'fetching_candidates',
+      timeline: null,
+      taskId: null,
+      runId: s.runId + 1,
+    }))
     try {
       const res = await editorApi.triggerEditor(project)
       set({ taskId: res.task_id })
@@ -77,7 +88,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   pollStatus: async () => {
     const { taskId } = get()
-    if (!taskId) return true
+    // No task ID yet — new run is still triggering, keep polling
+    if (!taskId) return false
     try {
       const res = await getTaskStatus(taskId)
       if (res.status === 'SUCCESS') {
@@ -108,5 +120,6 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       isRunning: false,
       phase: 'idle',
       error: null,
+      runId: 0,
     }),
 }))
