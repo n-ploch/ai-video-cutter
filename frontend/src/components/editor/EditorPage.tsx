@@ -66,19 +66,34 @@ export default function EditorPage() {
     }
   }, [currentProject, fetchStoryboard, fetchStoryboardVersions, fetchVersions, hydrateTaskState, reset])
 
-  // Load the correct storyboard when the dropdown selection changes
+  // When viewing a past timeline, load the storyboard it was built from.
+  // When back on the create-new view, use the dropdown selection (or latest).
+  const displayedTimeline = selectedVersion !== null ? viewingTimeline : timeline
+
   useEffect(() => {
     if (!currentProject) return
-    if (selectedStoryboardVersion === null) {
-      setActiveStoryboard(null)  // falls back to latestStoryboard
-      return
+    if (viewingTimeline) {
+      // Past timeline selected — load its own storyboard version
+      const sbVersion = viewingTimeline.storyboard?.version ?? null
+      if (sbVersion != null) {
+        getStoryboard(currentProject, sbVersion)
+          .then(setActiveStoryboard)
+          .catch(() => setActiveStoryboard(null))
+      } else {
+        setActiveStoryboard(null)
+      }
+    } else {
+      // Create-new view — load whichever storyboard is selected in the dropdown
+      if (selectedStoryboardVersion === null) {
+        setActiveStoryboard(null)  // falls back to latestStoryboard
+      } else {
+        getStoryboard(currentProject, selectedStoryboardVersion)
+          .then(setActiveStoryboard)
+          .catch(() => setActiveStoryboard(null))
+      }
     }
-    getStoryboard(currentProject, selectedStoryboardVersion)
-      .then(setActiveStoryboard)
-      .catch(() => setActiveStoryboard(null))
-  }, [currentProject, selectedStoryboardVersion])
+  }, [currentProject, viewingTimeline, selectedStoryboardVersion])
 
-  const displayedTimeline = selectedVersion !== null ? viewingTimeline : timeline
   const displayedStoryboard = activeStoryboard ?? latestStoryboard
 
   useEffect(() => {
