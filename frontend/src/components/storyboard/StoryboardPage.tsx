@@ -20,7 +20,6 @@ export default function StoryboardPage() {
     selectedVersion,
     viewingStoryboard,
     triggerStoryboard,
-    fetchStoryboard,
     fetchVersions,
     hydrateTaskState,
     selectVersion,
@@ -29,15 +28,17 @@ export default function StoryboardPage() {
     reset,
   } = useStoryboardStore()
 
-  // On project change: reset, load latest storyboard + versions, recover active task
+  // On project change: reset, load version list, recover any active task.
+  // fetchStoryboard is intentionally NOT called here — the default view is
+  // the blank "create new" chat interface.  Past versions are loaded on demand
+  // when the user clicks one in the sidebar.
   useEffect(() => {
     reset()
     if (currentProject) {
-      fetchStoryboard(currentProject)
       fetchVersions(currentProject)
       hydrateTaskState(currentProject)
     }
-  }, [currentProject, fetchStoryboard, fetchVersions, hydrateTaskState, reset])
+  }, [currentProject, fetchVersions, hydrateTaskState, reset])
 
   // Poll while a task is running — automatically starts/stops as isRunning changes.
   // usePolling re-runs its effect whenever shouldStop changes, so hydrating
