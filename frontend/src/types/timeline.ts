@@ -53,8 +53,14 @@ export interface TimelineReview {
   decision: string
 }
 
+export interface StoryboardMeta {
+  version: number
+  user_brief: string
+}
+
 export interface TimelineOutput {
   project_name: string
+  storyboard?: StoryboardMeta
   storyboard_version?: number
   scenes: SceneTimeline[]
   boundaries: BoundaryInfo[]

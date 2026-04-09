@@ -65,7 +65,9 @@ class CeleryProgressHandler(BaseCallbackHandler):
         self._phase_map = phase_map
         self._last_phase: str | None = None
 
-    def on_chain_start(self, serialized: dict, inputs, **kwargs) -> None:  # type: ignore[override]
+    def on_chain_start(self, serialized: dict | None, inputs, **kwargs) -> None:  # type: ignore[override]
+        if not serialized:
+            return
         node_name = serialized.get("name", "")
         phase = self._phase_map.get(node_name)
         if phase and phase != self._last_phase:
