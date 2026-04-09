@@ -10,6 +10,7 @@ export default function MediaPage() {
   const {
     videos,
     uploading,
+    error,
     selectedVideoHash,
     fetchVideos,
     uploadVideo,
@@ -61,6 +62,11 @@ export default function MediaPage() {
         }`}
       >
         <h1 className="text-xl font-semibold mb-4">Media</h1>
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
+            {error}
+          </div>
+        )}
         <VideoGrid
           videos={videos}
           project={currentProject}

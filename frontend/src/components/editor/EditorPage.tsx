@@ -7,13 +7,14 @@ import ScenePanel from './ScenePanel'
 import StartEditingButton from './StartEditingButton'
 import EditorPreview from './EditorPreview'
 import EditorTimeline from './EditorTimeline'
+import ExportButton from './ExportButton'
 
 export default function EditorPage() {
   const currentProject = useProjectStore((s) => s.currentProject)
   const storyboard = useStoryboardStore((s) => s.storyboard)
   const fetchStoryboard = useStoryboardStore((s) => s.fetchStoryboard)
 
-  const { timeline, isRunning, fetchTimeline, pollStatus, reset } = useEditorStore()
+  const { timeline, isRunning, phase, fetchTimeline, pollStatus, reset } = useEditorStore()
 
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0)
 
@@ -90,7 +91,14 @@ export default function EditorPage() {
             )}
           </div>
 
-          <StartEditingButton projectName={currentProject} />
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <StartEditingButton projectName={currentProject} />
+            </div>
+            {phase === 'done' && timeline && (
+              <ExportButton projectName={currentProject} />
+            )}
+          </div>
         </div>
       </div>
 
