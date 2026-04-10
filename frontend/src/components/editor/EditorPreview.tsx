@@ -28,12 +28,17 @@ interface Props {
   timeline: TimelineOutput
   currentIndex: number
   onIndexChange: (idx: number) => void
+  onTimeUpdate?: (t: number) => void
 }
 
-export default function EditorPreview({ project, timeline, currentIndex, onIndexChange }: Props) {
+export default function EditorPreview({ project, timeline, currentIndex, onIndexChange, onTimeUpdate }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
+
+  const prevSrcRef    = useRef<string>('')
+  const playingRef    = useRef(false)
+  const entryStartRef = useRef(0)
 
   const entries = flattenTimeline(timeline)
   const entry = entries[currentIndex]
@@ -42,14 +47,25 @@ export default function EditorPreview({ project, timeline, currentIndex, onIndex
     ? getDownsampledUrl(project, entry.source_video, entry.video_file)
     : ''
 
+  // Keep refs in sync with current render values so async callbacks see fresh data
+  playingRef.current    = playing
+  entryStartRef.current = entry?.start ?? 0
+
   // Seek to segment start when entry changes
   useEffect(() => {
     const v = videoRef.current
     if (!v || !entry) return
-    v.currentTime = entry.start
-    setCurrentTime(entry.start)
-    if (playing) {
-      v.play().catch(() => {})
+
+    if (src === prevSrcRef.current) {
+      // Same source file — browser already has it, safe to seek immediately
+      v.currentTime = entry.start
+      setCurrentTime(entry.start)
+      if (playing) v.play().catch(() => {})
+    } else {
+      // Source file changed — browser will reload; onLoadedMetadata will finish the job
+      prevSrcRef.current = src
+      entryStartRef.current = entry.start
+      setCurrentTime(entry.start)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, src])
@@ -74,7 +90,8 @@ export default function EditorPreview({ project, timeline, currentIndex, onIndex
       return
     }
     setCurrentTime(t)
-  }, [entry, currentIndex, entries.length, onIndexChange])
+    onTimeUpdate?.(t)
+  }, [entry, currentIndex, entries.length, onIndexChange, onTimeUpdate])
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current
@@ -121,7 +138,9 @@ export default function EditorPreview({ project, timeline, currentIndex, onIndex
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={() => {
             const v = videoRef.current
-            if (v) v.currentTime = entry.start
+            if (!v) return
+            v.currentTime = entryStartRef.current
+            if (playingRef.current) v.play().catch(() => {})
           }}
           onEnded={() => {}}
           className="w-full h-full object-contain"

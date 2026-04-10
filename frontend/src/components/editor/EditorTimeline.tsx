@@ -44,12 +44,19 @@ function buildFlatSegments(timeline: TimelineOutput): FlatSegment[] {
 interface Props {
   timeline: TimelineOutput
   currentIndex: number
+  currentTime: number
   onIndexChange: (idx: number) => void
 }
 
-export default function EditorTimeline({ timeline, currentIndex, onIndexChange }: Props) {
+export default function EditorTimeline({ timeline, currentIndex, currentTime, onIndexChange }: Props) {
   const flat = buildFlatSegments(timeline)
   const totalDuration = flat.reduce((sum, s) => sum + s.entry.duration, 0) || 1
+
+  const activeSeg = flat[currentIndex]
+  const globalTime = activeSeg
+    ? activeSeg.globalStart + Math.max(0, currentTime - activeSeg.entry.start)
+    : 0
+  const playheadPct = Math.min((globalTime / totalDuration) * 100, 100)
 
   return (
     <div className="h-full flex flex-col">
@@ -71,30 +78,38 @@ export default function EditorTimeline({ timeline, currentIndex, onIndexChange }
       </div>
 
       {/* Segment row */}
-      <div className="flex-1 flex px-3 gap-px overflow-hidden">
-        {flat.map((seg) => {
-          const isActive = seg.globalIdx === currentIndex
-          const widthPct = (seg.entry.duration / totalDuration) * 100
-          const colorClass = isActive
-            ? SCENE_COLORS_ACTIVE[seg.sceneIdx % SCENE_COLORS_ACTIVE.length]
-            : SCENE_COLORS[seg.sceneIdx % SCENE_COLORS.length]
+      <div className="flex-1 relative px-3 overflow-hidden">
+        <div className="flex h-full gap-0">
+          {flat.map((seg) => {
+            const isActive = seg.globalIdx === currentIndex
+            const widthPct = (seg.entry.duration / totalDuration) * 100
+            const colorClass = isActive
+              ? SCENE_COLORS_ACTIVE[seg.sceneIdx % SCENE_COLORS_ACTIVE.length]
+              : SCENE_COLORS[seg.sceneIdx % SCENE_COLORS.length]
 
-          return (
-            <button
-              key={seg.globalIdx}
-              onClick={() => onIndexChange(seg.globalIdx)}
-              className={`relative border rounded-b flex items-end justify-start px-1 pb-1 group transition-colors cursor-pointer ${colorClass} ${isActive ? 'ring-1 ring-white/30' : 'hover:brightness-125'}`}
-              style={{ width: `${Math.max(0.5, widthPct)}%`, minWidth: '4px' }}
-              title={`Scene ${seg.entry.scene_id} · ${seg.entry.segment_id} · ${seg.entry.duration.toFixed(1)}s`}
-            >
-              {widthPct > 3 && (
-                <span className="text-[9px] font-mono text-white/60 truncate leading-none">
-                  {seg.entry.duration.toFixed(1)}s
-                </span>
-              )}
-            </button>
-          )
-        })}
+            return (
+              <button
+                key={seg.globalIdx}
+                onClick={() => onIndexChange(seg.globalIdx)}
+                className={`relative border rounded-b flex items-end justify-start px-1 pb-1 group transition-colors cursor-pointer ${colorClass} ${isActive ? 'ring-1 ring-white/30' : 'hover:brightness-125'}`}
+                style={{ width: `${Math.max(0.5, widthPct)}%`, minWidth: '4px' }}
+                title={`Scene ${seg.entry.scene_id} · ${seg.entry.segment_id} · ${seg.entry.duration.toFixed(1)}s`}
+              >
+                {widthPct > 3 && (
+                  <span className="text-[9px] font-mono text-white/60 truncate leading-none">
+                    {seg.entry.duration.toFixed(1)}s
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Playhead */}
+        <div
+          className="absolute top-0 h-full w-0.5 bg-white/80 z-20 pointer-events-none"
+          style={{ left: `calc(${playheadPct}% + 0.75rem)` }}
+        />
       </div>
 
       {/* Segment info footer */}

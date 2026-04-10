@@ -50,6 +50,7 @@ export default function EditorPage() {
   } = useEditorStore()
 
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
   // Storyboard shown in ScenePanel — tracks selectedStoryboardVersion dropdown
   const [activeStoryboard, setActiveStoryboard] = useState<StoryboardOutput | null>(null)
 
@@ -71,6 +72,7 @@ export default function EditorPage() {
 
     reset()
     setCurrentSegmentIndex(0)
+    setCurrentTime(0)
     setActiveStoryboard(null)
     if (currentProject) {
       // Load storyboard data for the scene panel (not fetchTimeline — default is create new)
@@ -113,6 +115,7 @@ export default function EditorPage() {
 
   useEffect(() => {
     setCurrentSegmentIndex(0)
+    setCurrentTime(0)
   }, [displayedTimeline])
 
   // Poll while running — auto-starts after hydrateTaskState sets isRunning
@@ -252,6 +255,7 @@ export default function EditorPage() {
                 timeline={displayedTimeline}
                 currentIndex={currentSegmentIndex}
                 onIndexChange={setCurrentSegmentIndex}
+                onTimeUpdate={setCurrentTime}
               />
             ) : (
               <div className="w-full h-full bg-black rounded-xl flex items-center justify-center text-muted text-sm">
@@ -267,6 +271,7 @@ export default function EditorPage() {
             <EditorTimeline
               timeline={displayedTimeline}
               currentIndex={currentSegmentIndex}
+              currentTime={currentTime}
               onIndexChange={setCurrentSegmentIndex}
             />
           ) : (
