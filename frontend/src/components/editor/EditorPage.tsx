@@ -53,17 +53,21 @@ export default function EditorPage() {
   // Storyboard shown in ScenePanel — tracks selectedStoryboardVersion dropdown
   const [activeStoryboard, setActiveStoryboard] = useState<StoryboardOutput | null>(null)
 
-  // Track whether this is the initial mount so we don't clear the storyboard version
-  // that was pre-selected by the storyboard page (UseStoryboardButton).
-  const isFirstMountRef = useRef(true)
+  // Tracks the previous project to distinguish initial mount / StrictMode re-invocation
+  // (prevProject === currentProject) from a real project switch (they differ).
+  // Using undefined as sentinel: "effect has never run before".
+  const prevProjectRef = useRef<string | null | undefined>(undefined)
 
   // On project change: reset to "create new" default, load versions + storyboard data
   useEffect(() => {
-    if (!isFirstMountRef.current) {
-      // Actual project switch — discard any pre-selected storyboard version
+    const prevProject = prevProjectRef.current
+    prevProjectRef.current = currentProject
+
+    // Clear the pre-selected storyboard version only on a real project switch,
+    // not on initial mount or StrictMode's double-invocation (where prev === current).
+    if (prevProject !== undefined && prevProject !== currentProject) {
       setSelectedStoryboardVersion(null)
     }
-    isFirstMountRef.current = false
 
     reset()
     setCurrentSegmentIndex(0)

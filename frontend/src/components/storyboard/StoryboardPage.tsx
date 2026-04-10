@@ -96,62 +96,69 @@ export default function StoryboardPage() {
         onSelectVersion={handleSelectVersion}
       />
 
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-3xl mx-auto px-6 py-4 space-y-4">
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-auto">
+          <div className="max-w-3xl mx-auto px-6 py-4 space-y-4 pb-28">
 
-          {isActiveView ? (
-            // ── Active view: chat input + live generation progress ──
-            <>
-              <ChatInput
-                onSubmit={handleSubmit}
-                disabled={isRunning}
-                submitted={!!submittedBrief || !!storyboard}
-              />
+            {isActiveView ? (
+              // ── Active view: chat input + live generation progress ──
+              <>
+                <ChatInput
+                  onSubmit={handleSubmit}
+                  disabled={isRunning}
+                  submitted={!!submittedBrief || !!storyboard}
+                />
 
-              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
-                  {error}
-                </div>
-              )}
-            </>
-          ) : (
-            // ── Past version view: read-only header ──
-            <div className="flex items-center gap-2 py-2 text-sm text-muted">
-              <span className="font-mono font-semibold text-foreground">
-                v{selectedVersion}
-              </span>
-              <span>— read-only</span>
-            </div>
-          )}
-
-          {brief && <BriefTile brief={brief} />}
-
-          {displayedStoryboard && (
-            <>
-              <StoryTile
-                story={displayedStoryboard.story}
-                score={displayedStoryboard.story_judge_result?.total_score}
-              />
-              <div className="space-y-3">
-                <p className="text-xs text-muted font-medium">
-                  Scenes ({displayedStoryboard.scenes.length})
-                </p>
-                {displayedStoryboard.scenes.map((scene) => (
-                  <SceneTile key={scene.id} scene={scene} />
-                ))}
+                {error && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
+                    {error}
+                  </div>
+                )}
+              </>
+            ) : (
+              // ── Past version view: read-only header ──
+              <div className="flex items-center gap-2 py-2 text-sm text-muted">
+                <span className="font-mono font-semibold text-foreground">
+                  v{selectedVersion}
+                </span>
+                <span>— read-only</span>
               </div>
-            </>
-          )}
+            )}
 
-          {/* Use Storyboard button — shown whenever there's content to use */}
-          {displayedStoryboard && (
-            <UseStoryboardButton
-              isRunning={isRunning && isActiveView}
-              hasStoryboard={!!displayedStoryboard}
-              viewedVersion={selectedVersion}
-            />
-          )}
+            {brief && <BriefTile brief={brief} />}
+
+            {displayedStoryboard && (
+              <>
+                <StoryTile
+                  story={displayedStoryboard.story}
+                  score={displayedStoryboard.story_judge_result?.total_score}
+                />
+                <div className="space-y-3">
+                  <p className="text-xs text-muted font-medium">
+                    Scenes ({displayedStoryboard.scenes.length})
+                  </p>
+                  {displayedStoryboard.scenes.map((scene) => (
+                    <SceneTile key={scene.id} scene={scene} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Floating bottom button — visible whenever there's a storyboard to use */}
+        {displayedStoryboard && (
+          <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-6 pt-12 bg-gradient-to-t from-bg-primary via-bg-primary/80 to-transparent pointer-events-none">
+            <div className="pointer-events-auto w-full max-w-3xl px-6">
+              <UseStoryboardButton
+                isRunning={isRunning && isActiveView}
+                hasStoryboard={!!displayedStoryboard}
+                viewedVersion={selectedVersion}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
