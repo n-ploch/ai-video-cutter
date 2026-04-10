@@ -118,6 +118,148 @@ Runtime infrastructure (Redis URL, storage root, API keys) is set via environmen
 
 ---
 
+## Deployment
+
+### Prerequisites
+
+- Docker and Docker Compose v2
+- API keys (see Environment variables below)
+
+### Steps
+
+```bash
+# 1. Clone and enter the repo
+git clone <repo-url>
+cd ai-video-cutter
+
+# 2. Create .env
+cp .env.example .env
+# Edit .env — fill in GEMINI_API_KEY, at least one LLM key, and HOST_STORAGE_ROOT
+
+# 3. Start all services (detached)
+./start.sh
+```
+
+`./start.sh` verifies `.env` exists, creates `local/data/projects/`, then runs `docker compose up --build -d`.
+
+### Verify the stack is up
+
+```bash
+# API health check
+curl http://localhost:8000/health
+# → {"status": "ok"}
+
+# List projects (empty on first run)
+curl http://localhost:8000/api/v1/projects
+# → []
+```
+
+Interactive API docs are at `http://localhost:8000/docs`.
+
+### Endpoints an agent needs
+
+The API is the only entry point. The agent should call `http://localhost:8000` (or whatever host/port the stack is deployed on). All paths are under `/api/v1/`.
+
+**Minimum happy-path sequence:**
+
+```
+POST /api/v1/projects                          — create project
+POST /api/v1/projects/{name}/videos            — upload video (multipart), triggers processing
+GET  /api/v1/status/{task_id}                  — poll until celery_state == "SUCCESS"
+POST /api/v1/projects/{name}/storyboard        — start storyboard agent (needs brief)
+GET  /api/v1/status/{task_id}                  — poll until SUCCESS
+POST /api/v1/projects/{name}/editor            — start editor agent
+GET  /api/v1/status/{task_id}                  — poll until SUCCESS
+POST /api/v1/projects/{name}/export            — export to .otio (synchronous)
+```
+
+### Polling pattern
+
+Agent triggers are async. Always poll after triggering:
+
+```python
+import time, requests
+
+BASE = "http://localhost:8000"
+
+def wait_for_task(task_id, interval=5, timeout=600):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = requests.get(f"{BASE}/api/v1/status/{task_id}").json()
+        status = r["status"]
+        if status == "SUCCESS":
+            return r["result"]
+        if status == "FAILURE":
+            raise RuntimeError(r["error"])
+        if status == "awaiting_human":
+            raise RuntimeError("Task paused at human gate — resume via /resume endpoint")
+        time.sleep(interval)
+    raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
+```
+
+### Uploading a video
+
+```python
+with open("clip.mp4", "rb") as f:
+    r = requests.post(
+        f"{BASE}/api/v1/projects/my-project/videos",
+        files={"file": ("clip.mp4", f, "video/mp4")},
+        params={"include_vlm": True},
+    )
+task_id = r.json()["task_id"]
+wait_for_task(task_id)
+```
+
+Upload is idempotent — re-uploading the same file reuses existing data.
+
+### Generating a storyboard
+
+```python
+r = requests.post(
+    f"{BASE}/api/v1/projects/my-project/storyboard",
+    json={"brief": "A dramatic alpine journey building to a summit reveal.", "human_in_the_loop": False},
+)
+wait_for_task(r.json()["task_id"])
+```
+
+### Assembling a timeline
+
+```python
+r = requests.post(
+    f"{BASE}/api/v1/projects/my-project/editor",
+    json={"human_in_the_loop": False},
+)
+wait_for_task(r.json()["task_id"])
+```
+
+### Exporting
+
+```python
+r = requests.post(
+    f"{BASE}/api/v1/projects/my-project/export",
+    json={"version": "latest", "rate": 30.0},
+)
+otio_url = r.json()["otio_url"]   # file served at /files/...
+```
+
+### Stopping / restarting
+
+```bash
+docker compose down          # stop, keep volumes
+docker compose down -v       # stop and delete redis data
+./start.sh                   # restart
+```
+
+### Logs
+
+```bash
+docker compose logs -f api
+docker compose logs -f celery-video
+docker compose logs -f celery-agents
+```
+
+---
+
 ## CLI (no Docker required)
 
 ```bash
