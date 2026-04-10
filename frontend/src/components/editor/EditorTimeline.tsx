@@ -78,8 +78,8 @@ export default function EditorTimeline({ timeline, currentIndex, currentTime, on
       </div>
 
       {/* Segment row */}
-      <div className="flex-1 relative px-3 overflow-hidden">
-        <div className="flex h-full gap-0">
+      <div className="flex-1 px-3 overflow-hidden">
+        <div className="relative flex h-full gap-0">
           {flat.map((seg) => {
             const isActive = seg.globalIdx === currentIndex
             const widthPct = (seg.entry.duration / totalDuration) * 100
@@ -103,13 +103,13 @@ export default function EditorTimeline({ timeline, currentIndex, currentTime, on
               </button>
             )
           })}
-        </div>
 
-        {/* Playhead */}
-        <div
-          className="absolute top-0 h-full w-0.5 bg-white/80 z-20 pointer-events-none"
-          style={{ left: `calc(${playheadPct}% + 0.75rem)` }}
-        />
+          {/* Playhead — inside the relative container so left:% matches segment widths */}
+          <div
+            className="absolute top-0 h-full w-0.5 bg-white/80 z-20 pointer-events-none"
+            style={{ left: `${playheadPct}%` }}
+          />
+        </div>
       </div>
 
       {/* Segment info footer */}

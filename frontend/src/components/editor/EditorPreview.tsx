@@ -42,10 +42,15 @@ export default function EditorPreview({ project, timeline, currentIndex, onIndex
 
   const entries = flattenTimeline(timeline)
   const entry = entries[currentIndex]
+  const nextEntry = entries[currentIndex + 1]
 
   const src = entry
     ? getDownsampledUrl(project, entry.source_video, entry.video_file)
     : ''
+  // Preload next segment's source file in the background so switching is seamless
+  const nextSrc = nextEntry
+    ? getDownsampledUrl(project, nextEntry.source_video, nextEntry.video_file)
+    : null
 
   // Keep refs in sync with current render values so async callbacks see fresh data
   playingRef.current    = playing
@@ -60,12 +65,14 @@ export default function EditorPreview({ project, timeline, currentIndex, onIndex
       // Same source file — browser already has it, safe to seek immediately
       v.currentTime = entry.start
       setCurrentTime(entry.start)
+      onTimeUpdate?.(entry.start)
       if (playing) v.play().catch(() => {})
     } else {
       // Source file changed — browser will reload; onLoadedMetadata will finish the job
       prevSrcRef.current = src
       entryStartRef.current = entry.start
       setCurrentTime(entry.start)
+      onTimeUpdate?.(entry.start)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, src])
@@ -145,6 +152,11 @@ export default function EditorPreview({ project, timeline, currentIndex, onIndex
           onEnded={() => {}}
           className="w-full h-full object-contain"
         />
+        {/* Preload next segment's source file while current one plays */}
+        {nextSrc && nextSrc !== src && (
+          <video key={nextSrc} src={nextSrc} preload="auto" className="hidden" aria-hidden />
+        )}
+
         {!playing && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/20">
             <Play size={48} className="text-white/80" />
