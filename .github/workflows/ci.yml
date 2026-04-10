@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[all]"
+      - run: pip install -e ".[all]" pytest
       - run: pytest tests/ -v
 
   frontend-tests:
