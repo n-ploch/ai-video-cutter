@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
@@ -60,6 +61,24 @@ def process(
     storage = ProjectStorage(root=storage_root, default_config=config_path)
     name = project_name or video.stem
     video_hash = hash_video_file(video)
+
+    # Copy the original into the project folder with _original suffix so the UI
+    # can serve it via /files/. Mirrors what the API does on upload.
+    videos_dir = storage.get_project_path(name) / "videos" / video_hash
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    original_dest = videos_dir / f"{video.stem}_original{video.suffix}"
+    if not original_dest.exists():
+        shutil.copy2(video, original_dest)
+    # Ensure manifest storage_key and filename reflect the _original convention.
+    storage.add_video(name, video)
+    manifest = storage._load_manifest(name)
+    if video_hash in manifest["videos"]:
+        entry = manifest["videos"][video_hash]
+        storage_key = f"{name}/videos/{video_hash}/{original_dest.name}"
+        if entry.get("storage_key") != storage_key:
+            entry["storage_key"] = storage_key
+            entry["filename"] = original_dest.name
+            storage._save_manifest(name, manifest)
 
     segmented_current = not force and storage.is_step_current(name, video_hash, "segmented", settings)
 
