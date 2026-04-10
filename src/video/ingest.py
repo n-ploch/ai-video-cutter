@@ -32,7 +32,10 @@ def probe_video(path: Path | str) -> VideoFile:
         "-show_format",
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise VideoIngestError("ffprobe not found; ensure ffmpeg is installed") from exc
 
     if result.returncode != 0:
         raise VideoIngestError(
