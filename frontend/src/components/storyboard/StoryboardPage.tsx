@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useProjectStore } from '../../stores/projectStore'
+import ProjectEmptyState from '../layout/ProjectEmptyState'
 import { useStoryboardStore } from '../../stores/storyboardStore'
 import { usePolling } from '../../hooks/usePolling'
 import ChatInput from './ChatInput'
@@ -7,6 +8,7 @@ import BriefTile from './BriefTile'
 import StoryTile from './StoryTile'
 import SceneTile from './SceneTile'
 import UseStoryboardButton from './UseStoryboardButton'
+import StoryboardVersionSidebar from './StoryboardVersionSidebar'
 
 export default function StoryboardPage() {
   const currentProject = useProjectStore((s) => s.currentProject)
@@ -15,26 +17,38 @@ export default function StoryboardPage() {
     isRunning,
     error,
     submittedBrief,
+    versions,
+    selectedVersion,
+    viewingStoryboard,
     triggerStoryboard,
-    fetchStoryboard,
+    fetchVersions,
+    hydrateTaskState,
+    selectVersion,
+    startNew,
     pollStatus,
     reset,
   } = useStoryboardStore()
 
-  // Reset on project change
+  // On project change: reset, load version list, recover any active task.
+  // fetchStoryboard is intentionally NOT called here — the default view is
+  // the blank "create new" chat interface.  Past versions are loaded on demand
+  // when the user clicks one in the sidebar.
   useEffect(() => {
     reset()
     if (currentProject) {
-      // Try to load existing storyboard
-      fetchStoryboard(currentProject)
+      fetchVersions(currentProject)
+      hydrateTaskState(currentProject)
     }
-  }, [currentProject, fetchStoryboard, reset])
+  }, [currentProject, fetchVersions, hydrateTaskState, reset])
 
-  // Poll while running
+  // Poll while a task is running — automatically starts/stops as isRunning changes.
+  // usePolling re-runs its effect whenever shouldStop changes, so hydrating
+  // isRunning from false → true (page refresh) will start polling immediately.
   usePolling(
     async () => {
-      const done = await pollStatus()
-      if (done && currentProject) {
+      if (!currentProject) return
+      const done = await pollStatus(currentProject)
+      if (done) {
         fetchStoryboard(currentProject)
       }
     },
@@ -47,54 +61,104 @@ export default function StoryboardPage() {
     triggerStoryboard(currentProject, brief)
   }
 
-  if (!currentProject) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted">
-        Select or create a project to get started
-      </div>
-    )
+  const handleCreateNew = () => {
+    startNew()
+    // selectVersion sets selectedVersion = null and clears viewingStoryboard
+    // startNew already does this, but calling it ensures the sidebar deselects
   }
 
-  const brief = storyboard?.user_brief ?? submittedBrief
+  const handleSelectVersion = (v: number | null) => {
+    if (!currentProject) return
+    if (v === null) {
+      // Return to active view without clearing active state
+      selectVersion(currentProject, null)
+    } else {
+      selectVersion(currentProject, v)
+    }
+  }
+
+  if (!currentProject) {
+    return <ProjectEmptyState />
+  }
+
+  // What to display in the main content area
+  const isActiveView = selectedVersion === null
+  const displayedStoryboard = isActiveView ? storyboard : viewingStoryboard
+  const brief = displayedStoryboard?.user_brief ?? (isActiveView ? submittedBrief : null)
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="max-w-3xl mx-auto px-6 py-4 space-y-4">
-        <ChatInput
-          onSubmit={handleSubmit}
-          disabled={isRunning}
-          submitted={!!submittedBrief || !!storyboard}
-        />
+    <div className="h-full flex overflow-hidden">
+      <StoryboardVersionSidebar
+        versions={versions}
+        selectedVersion={selectedVersion}
+        isRunning={isRunning}
+        onCreateNew={handleCreateNew}
+        onSelectVersion={handleSelectVersion}
+      />
 
-        {error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
-            {error}
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-auto">
+          <div className="max-w-3xl mx-auto px-6 py-4 space-y-4 pb-28">
+
+            {isActiveView ? (
+              // ── Active view: chat input + live generation progress ──
+              <>
+                <ChatInput
+                  onSubmit={handleSubmit}
+                  disabled={isRunning}
+                  submitted={!!submittedBrief || !!storyboard}
+                />
+
+                {error && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400">
+                    {error}
+                  </div>
+                )}
+              </>
+            ) : (
+              // ── Past version view: read-only header ──
+              <div className="flex items-center gap-2 py-2 text-sm text-muted">
+                <span className="font-mono font-semibold text-foreground">
+                  v{selectedVersion}
+                </span>
+                <span>— read-only</span>
+              </div>
+            )}
+
+            {brief && <BriefTile brief={brief} />}
+
+            {displayedStoryboard && (
+              <>
+                <StoryTile
+                  story={displayedStoryboard.story}
+                  score={displayedStoryboard.story_judge_result?.total_score}
+                />
+                <div className="space-y-3">
+                  <p className="text-xs text-muted font-medium">
+                    Scenes ({displayedStoryboard.scenes.length})
+                  </p>
+                  {displayedStoryboard.scenes.map((scene) => (
+                    <SceneTile key={scene.id} scene={scene} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Floating bottom button — visible whenever there's a storyboard to use */}
+        {displayedStoryboard && (
+          <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-6 pt-12 bg-gradient-to-t from-bg-primary via-bg-primary/80 to-transparent pointer-events-none">
+            <div className="pointer-events-auto w-full max-w-3xl px-6">
+              <UseStoryboardButton
+                isRunning={isRunning && isActiveView}
+                hasStoryboard={!!displayedStoryboard}
+                viewedVersion={selectedVersion}
+              />
+            </div>
           </div>
         )}
-
-        {brief && <BriefTile brief={brief} />}
-
-        {storyboard && (
-          <>
-            <StoryTile
-              story={storyboard.story}
-              score={storyboard.story_judge_result?.total_score}
-            />
-            <div className="space-y-3">
-              <p className="text-xs text-muted font-medium">
-                Scenes ({storyboard.scenes.length})
-              </p>
-              {storyboard.scenes.map((scene) => (
-                <SceneTile key={scene.id} scene={scene} />
-              ))}
-            </div>
-          </>
-        )}
-
-        <UseStoryboardButton
-          isRunning={isRunning}
-          hasStoryboard={!!storyboard}
-        />
       </div>
     </div>
   )

@@ -1,13 +1,16 @@
 import { useNavigate } from 'react-router'
 import { Loader2 } from 'lucide-react'
+import { useEditorStore } from '../../stores/editorStore'
 
 interface Props {
   isRunning: boolean
   hasStoryboard: boolean
+  viewedVersion: number | null  // null = latest/active
 }
 
-export default function UseStoryboardButton({ isRunning, hasStoryboard }: Props) {
+export default function UseStoryboardButton({ isRunning, hasStoryboard, viewedVersion }: Props) {
   const navigate = useNavigate()
+  const setSelectedStoryboardVersion = useEditorStore((s) => s.setSelectedStoryboardVersion)
 
   if (isRunning) {
     return (
@@ -20,12 +23,18 @@ export default function UseStoryboardButton({ isRunning, hasStoryboard }: Props)
 
   if (!hasStoryboard) return null
 
+  const handleClick = () => {
+    // Pass the viewed version to editor so the dropdown pre-selects it
+    setSelectedStoryboardVersion(viewedVersion)
+    navigate('/editor')
+  }
+
   return (
     <button
-      onClick={() => navigate('/editor')}
+      onClick={handleClick}
       className="w-full py-4 px-6 bg-accent text-white text-lg font-semibold rounded-xl hover:bg-accent/90 transition-colors"
     >
-      Use Storyboard
+      Use Storyboard{viewedVersion !== null ? ` (v${viewedVersion})` : ''}
     </button>
   )
 }

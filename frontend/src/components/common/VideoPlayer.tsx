@@ -7,10 +7,11 @@ interface Props {
   startTime?: number
   endTime?: number
   onTimeUpdate?: (time: number) => void
+  onDurationChange?: (duration: number) => void
   className?: string
 }
 
-export default function VideoPlayer({ src, startTime, endTime, onTimeUpdate, className = '' }: Props) {
+export default function VideoPlayer({ src, startTime, endTime, onTimeUpdate, onDurationChange, className = '' }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -92,6 +93,7 @@ export default function VideoPlayer({ src, startTime, endTime, onTimeUpdate, cla
             const v = videoRef.current
             if (v) {
               setDuration(v.duration)
+              onDurationChange?.(v.duration)
               if (startTime != null) v.currentTime = startTime
             }
           }}

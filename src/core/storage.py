@@ -70,7 +70,7 @@ T = TypeVar("T", bound=BaseModel)
 _SUBFOLDERS = ("videos", "analysis", "storyboard", "timeline")
 
 # Processing steps tracked in the manifest.
-PROCESSING_STEPS = ("probed", "downsampled", "optical_flow", "segmented", "described")
+PROCESSING_STEPS = ("downsampled", "optical_flow", "segmented", "described")
 
 
 # ── Video hashing ─────────────────────────────────────────────────────────────
@@ -282,6 +282,28 @@ class ProjectStorage:
         return raw
 
     # ── Versioned outputs ─────────────────────────────────────────────────────
+
+    def list_versioned(self, project_name: str, category: str) -> list[dict]:
+        """Return metadata for all versioned files under ``{category}/``.
+
+        Each entry is a dict with ``version`` (int) and ``created_at`` (ISO
+        timestamp derived from the file's mtime).  Results are sorted ascending
+        by version number.  Returns an empty list if the directory doesn't exist
+        or contains no versioned files.
+        """
+        category_dir = self._project_dir(project_name) / category
+        if not category_dir.exists():
+            return []
+        entries = []
+        for f in category_dir.iterdir():
+            m = re.fullmatch(r"v(\d+)\.json", f.name)
+            if m:
+                mtime = f.stat().st_mtime
+                entries.append({
+                    "version": int(m.group(1)),
+                    "created_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+                })
+        return sorted(entries, key=lambda x: x["version"])
 
     def save_versioned(
         self,

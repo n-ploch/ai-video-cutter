@@ -1,43 +1,131 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { useProjectStore } from '../../stores/projectStore'
+import ProjectEmptyState from '../layout/ProjectEmptyState'
 import { useStoryboardStore } from '../../stores/storyboardStore'
-import { useEditorStore } from '../../stores/editorStore'
+import { useEditorStore, PHASE_LABELS, phaseIndex, type EditorPhase } from '../../stores/editorStore'
 import { usePolling } from '../../hooks/usePolling'
+import { getStoryboard } from '../../api/storyboard'
 import ScenePanel from './ScenePanel'
-import StartEditingButton from './StartEditingButton'
 import EditorPreview from './EditorPreview'
 import EditorTimeline from './EditorTimeline'
 import ExportButton from './ExportButton'
+import EditorVersionSidebar from './EditorVersionSidebar'
+import type { StoryboardOutput } from '../../types/storyboard'
+
+const ACTIVE_PHASES: EditorPhase[] = [
+  'fetching_candidates',
+  'assembling_scenes',
+  'stitching',
+  'reviewing',
+  'persisting',
+]
 
 export default function EditorPage() {
   const currentProject = useProjectStore((s) => s.currentProject)
-  const storyboard = useStoryboardStore((s) => s.storyboard)
-  const fetchStoryboard = useStoryboardStore((s) => s.fetchStoryboard)
 
-  const { timeline, isRunning, phase, runId, fetchTimeline, pollStatus, reset } = useEditorStore()
+  // Storyboard store — latest storyboard + version list for the dropdown
+  const latestStoryboard = useStoryboardStore((s) => s.storyboard)
+  const storyboardVersions = useStoryboardStore((s) => s.versions)
+  const fetchStoryboard = useStoryboardStore((s) => s.fetchStoryboard)
+  const fetchStoryboardVersions = useStoryboardStore((s) => s.fetchVersions)
+
+  const {
+    timeline,
+    isRunning,
+    phase,
+    error,
+    runId,
+    versions,
+    selectedVersion,
+    viewingTimeline,
+    selectedStoryboardVersion,
+    fetchVersions,
+    selectVersion,
+    setSelectedStoryboardVersion,
+    hydrateTaskState,
+    triggerEditor,
+    pollStatus,
+    reset,
+  } = useEditorStore()
 
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  // Storyboard shown in ScenePanel — tracks selectedStoryboardVersion dropdown
+  const [activeStoryboard, setActiveStoryboard] = useState<StoryboardOutput | null>(null)
 
-  // Reset and load on project change
+  // Tracks the previous project to distinguish initial mount / StrictMode re-invocation
+  // (prevProject === currentProject) from a real project switch (they differ).
+  // Using undefined as sentinel: "effect has never run before".
+  const prevProjectRef = useRef<string | null | undefined>(undefined)
+
+  // On project change: reset to "create new" default, load versions + storyboard data
   useEffect(() => {
+    const prevProject = prevProjectRef.current
+    prevProjectRef.current = currentProject
+
+    // Clear the pre-selected storyboard version only on a real project switch,
+    // not on initial mount or StrictMode's double-invocation (where prev === current).
+    if (prevProject !== undefined && prevProject !== currentProject) {
+      setSelectedStoryboardVersion(null)
+    }
+
     reset()
     setCurrentSegmentIndex(0)
+    setCurrentTime(0)
+    setActiveStoryboard(null)
     if (currentProject) {
+      // Load storyboard data for the scene panel (not fetchTimeline — default is create new)
       fetchStoryboard(currentProject)
-      fetchTimeline(currentProject)
+      fetchStoryboardVersions(currentProject)
+      fetchVersions(currentProject)
+      hydrateTaskState(currentProject)
     }
-  }, [currentProject, fetchStoryboard, fetchTimeline, reset])
+  }, [currentProject, fetchStoryboard, fetchStoryboardVersions, fetchVersions, hydrateTaskState, reset])
 
-  // Reset segment index when timeline loads
+  // When viewing a past timeline, load the storyboard it was built from.
+  // When back on the create-new view, use the dropdown selection (or latest).
+  const displayedTimeline = selectedVersion !== null ? viewingTimeline : timeline
+
+  useEffect(() => {
+    if (!currentProject) return
+    if (viewingTimeline) {
+      // Past timeline selected — load its own storyboard version
+      const sbVersion = viewingTimeline.storyboard?.version ?? null
+      if (sbVersion != null) {
+        getStoryboard(currentProject, sbVersion)
+          .then(setActiveStoryboard)
+          .catch(() => setActiveStoryboard(null))
+      } else {
+        setActiveStoryboard(null)
+      }
+    } else {
+      // Create-new view — load whichever storyboard is selected in the dropdown
+      if (selectedStoryboardVersion === null) {
+        setActiveStoryboard(null)  // falls back to latestStoryboard
+      } else {
+        getStoryboard(currentProject, selectedStoryboardVersion)
+          .then(setActiveStoryboard)
+          .catch(() => setActiveStoryboard(null))
+      }
+    }
+  }, [currentProject, viewingTimeline, selectedStoryboardVersion])
+
+  const displayedStoryboard = activeStoryboard ?? latestStoryboard
+
   useEffect(() => {
     setCurrentSegmentIndex(0)
-  }, [timeline])
+    setCurrentTime(0)
+  }, [displayedTimeline])
 
-  // Poll while running
+  // Poll while running — auto-starts after hydrateTaskState sets isRunning
   usePolling(
     async () => {
-      const done = await pollStatus()
-      if (done && currentProject) {
+      if (!currentProject) return
+      const done = await pollStatus(currentProject)
+      if (done) {
+        // Fetch the newly completed timeline into the active slot
+        const { fetchTimeline } = useEditorStore.getState()
         fetchTimeline(currentProject)
       }
     },
@@ -46,76 +134,152 @@ export default function EditorPage() {
   )
 
   if (!currentProject) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted">
-        Select or create a project to get started
-      </div>
-    )
+    return <ProjectEmptyState />
   }
 
-  if (!storyboard) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted">
-        Generate a storyboard first before editing
-      </div>
-    )
-  }
+  const isViewingPast = selectedVersion !== null
+  // Active finished = not viewing past, not running, and a completed timeline is loaded
+  const isActiveFinished = !isViewingPast && !isRunning && timeline !== null
+  const currentPhaseIdx = phaseIndex(phase)
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Main area: scene panel + preview */}
-      <div className="flex-1 flex min-h-0">
-        {/* Left: scene panel (40%) */}
-        <div className="w-2/5 border-r border-border overflow-hidden">
-          <ScenePanel
-            storyboard={storyboard}
-            timeline={timeline}
-            isRunning={isRunning}
-            runId={runId}
-          />
+    <div className="h-full flex overflow-hidden">
+      <EditorVersionSidebar
+        versions={versions}
+        selectedVersion={selectedVersion}
+        isRunning={isRunning}
+        onCreateNew={() => selectVersion(currentProject, null)}
+        onSelectVersion={(v) => selectVersion(currentProject, v)}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0">
+
+        {/* ── Top bar: storyboard selector + action ── */}
+        <div className="shrink-0 border-b border-border bg-bg-secondary px-4 py-3 flex items-center gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <label className="text-xs text-muted whitespace-nowrap">Storyboard</label>
+            <select
+              value={selectedStoryboardVersion ?? ''}
+              onChange={(e) => {
+                const val = e.target.value
+                setSelectedStoryboardVersion(val === '' ? null : Number(val))
+              }}
+              disabled={isRunning || isViewingPast}
+              className="text-xs bg-bg-primary border border-border rounded-lg px-2 py-1.5 text-foreground disabled:opacity-50 disabled:cursor-not-allowed min-w-0 max-w-xs"
+            >
+              <option value="">Latest</option>
+              {[...storyboardVersions]
+                .sort((a, b) => b.version - a.version)
+                .map((v) => (
+                  <option key={v.version} value={v.version}>
+                    v{v.version}{v.brief_snippet ? ` — ${v.brief_snippet.slice(0, 50)}` : ''}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div className="flex-1" />
+
+          {/* Action area — right side of top bar */}
+          {isViewingPast || isActiveFinished ? (
+            <div className="flex items-center gap-3">
+              <div className="px-4 py-1.5 bg-green-500/20 border border-green-500/30 rounded-lg text-sm text-green-400 font-medium">
+                Timeline ready
+              </div>
+              <ExportButton projectName={currentProject} />
+            </div>
+          ) : isRunning ? (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-sm text-foreground">
+                <Loader2 size={14} className="animate-spin text-accent shrink-0" />
+                <span>{PHASE_LABELS[phase]}</span>
+              </div>
+              <div className="flex gap-0.5">
+                {ACTIVE_PHASES.map((p, i) => (
+                  <div
+                    key={p}
+                    title={p}
+                    className={`w-6 h-1.5 rounded-full transition-colors ${
+                      i < currentPhaseIdx
+                        ? 'bg-accent'
+                        : i === currentPhaseIdx
+                          ? 'bg-accent/60'
+                          : 'bg-border'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : error ? (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-red-400 max-w-xs truncate">{error}</span>
+              <button
+                onClick={() => triggerEditor(currentProject, selectedStoryboardVersion)}
+                className="px-4 py-1.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/90 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => triggerEditor(currentProject, selectedStoryboardVersion)}
+              disabled={!displayedStoryboard}
+              className="px-4 py-1.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Start Editing
+            </button>
+          )}
         </div>
 
-        {/* Right: preview + start button (60%) */}
-        <div className="flex-1 flex flex-col gap-4 p-4 min-h-0">
-          <div className="flex-1 min-h-0">
-            {timeline ? (
-              <EditorPreview
-                project={currentProject}
-                timeline={timeline}
-                currentIndex={currentSegmentIndex}
-                onIndexChange={setCurrentSegmentIndex}
+        {/* ── Main area: scene panel + preview ── */}
+        <div className="flex-1 flex min-h-0">
+          <div className="w-2/5 border-r border-border overflow-hidden">
+            {displayedStoryboard ? (
+              <ScenePanel
+                storyboard={displayedStoryboard}
+                timeline={displayedTimeline}
+                isRunning={isRunning && !isViewingPast}
+                runId={runId}
               />
             ) : (
-              <div className="w-full h-full bg-black rounded-xl flex items-center justify-center text-muted text-sm">
-                Preview will appear after timeline is built
+              <div className="flex items-center justify-center h-full text-muted text-sm">
+                Generate a storyboard first
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <StartEditingButton projectName={currentProject} />
-            </div>
-            {phase === 'done' && timeline && (
-              <ExportButton projectName={currentProject} />
+          <div className="flex-1 flex flex-col p-4 min-h-0">
+            {displayedTimeline ? (
+              <EditorPreview
+                project={currentProject}
+                timeline={displayedTimeline}
+                currentIndex={currentSegmentIndex}
+                onIndexChange={setCurrentSegmentIndex}
+                onTimeUpdate={setCurrentTime}
+              />
+            ) : (
+              <div className="w-full h-full bg-black rounded-xl flex items-center justify-center text-muted text-sm">
+                {isRunning ? 'Building timeline…' : 'Preview will appear after timeline is built'}
+              </div>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Bottom: interactive timeline (full width, fixed height) */}
-      <div className="h-20 border-t border-border bg-bg-secondary shrink-0">
-        {timeline ? (
-          <EditorTimeline
-            timeline={timeline}
-            currentIndex={currentSegmentIndex}
-            onIndexChange={setCurrentSegmentIndex}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-muted">Timeline will appear here after assembly</p>
-          </div>
-        )}
+        {/* ── Bottom: interactive timeline ── */}
+        <div className="h-20 border-t border-border bg-bg-secondary shrink-0">
+          {displayedTimeline ? (
+            <EditorTimeline
+              timeline={displayedTimeline}
+              currentIndex={currentSegmentIndex}
+              currentTime={currentTime}
+              onIndexChange={setCurrentSegmentIndex}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-xs text-muted">Timeline will appear here after assembly</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

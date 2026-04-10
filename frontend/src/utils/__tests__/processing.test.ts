@@ -18,18 +18,18 @@ describe('computeProcessingPercent', () => {
     expect(computeProcessingPercent(ALL_DONE)).toBe(100)
   })
 
-  it('returns 20 for one completed step', () => {
-    expect(computeProcessingPercent({ ...ALL_NULL, probed: '2024-01-01T00:00:00Z' })).toBe(20)
+  it('returns 25 for one completed step', () => {
+    expect(computeProcessingPercent({ ...ALL_NULL, downsampled: '2024-01-01T00:00:00Z' })).toBe(25)
   })
 
-  it('returns 60 for three completed steps', () => {
+  it('returns 75 for three completed steps', () => {
     const steps = {
       ...ALL_NULL,
-      probed: 'ts',
       downsampled: 'ts',
       optical_flow: 'ts',
+      segmented: 'ts',
     }
-    expect(computeProcessingPercent(steps)).toBe(60)
+    expect(computeProcessingPercent(steps)).toBe(75)
   })
 })
 
@@ -43,8 +43,8 @@ describe('getCompletedSteps', () => {
   })
 
   it('returns only completed steps in order', () => {
-    const steps = { ...ALL_NULL, probed: 'ts', optical_flow: 'ts' }
-    expect(getCompletedSteps(steps)).toEqual(['probed', 'optical_flow'])
+    const steps = { ...ALL_NULL, downsampled: 'ts', optical_flow: 'ts' }
+    expect(getCompletedSteps(steps)).toEqual(['downsampled', 'optical_flow'])
   })
 })
 
@@ -63,7 +63,7 @@ describe('isFullyProcessed', () => {
   })
 
   it('returns false when first step is missing', () => {
-    const steps = { ...ALL_DONE, probed: null }
+    const steps = { ...ALL_DONE, downsampled: null }
     expect(isFullyProcessed(steps)).toBe(false)
   })
 })

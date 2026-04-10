@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from 'react'
 import { useProjectStore } from '../../stores/projectStore'
+import ProjectEmptyState from '../layout/ProjectEmptyState'
 import { useVideoStore } from '../../stores/videoStore'
 import { usePolling } from '../../hooks/usePolling'
 import VideoGrid from './VideoGrid'
@@ -44,11 +45,7 @@ export default function MediaPage() {
   )
 
   if (!currentProject) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted">
-        Select or create a project to get started
-      </div>
-    )
+    return <ProjectEmptyState />
   }
 
   const selectedVideo = videos.find((v) => v.video_hash === selectedVideoHash) ?? null

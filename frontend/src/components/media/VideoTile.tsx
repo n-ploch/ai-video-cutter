@@ -65,12 +65,8 @@ export default function VideoTile({ video, project, selected, onClick }: Props) 
         <p className="text-sm font-medium truncate" title={video.filename}>
           {displayName}
         </p>
-        {!processed && <ProcessingIndicator steps={video.steps} />}
-        {processed && (
-          <div className="flex items-center gap-1.5 text-xs text-green-400">
-            <div className="w-2 h-2 rounded-full bg-green-400" />
-            Ready
-          </div>
+        {!processed && (
+          <ProcessingIndicator steps={video.steps} currentStep={video.current_step} />
         )}
       </div>
     </div>
