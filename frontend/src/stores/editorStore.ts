@@ -190,6 +190,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       versions: [],
       selectedVersion: null,
       viewingTimeline: null,
-      selectedStoryboardVersion: null,
+      // selectedStoryboardVersion is intentionally not reset here so that
+      // navigating from the storyboard page preserves the pre-selected version.
+      // EditorPage clears it explicitly on project switch.
     }),
 }))

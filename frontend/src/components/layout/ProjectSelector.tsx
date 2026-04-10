@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, ChevronDown } from 'lucide-react'
 import { useProjectStore } from '../../stores/projectStore'
 
@@ -8,10 +8,23 @@ export default function ProjectSelector() {
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchProjects()
   }, [fetchProjects])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setCreating(false)
+        setNewName('')
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const handleCreate = async () => {
     if (!newName.trim()) return
@@ -26,7 +39,7 @@ export default function ProjectSelector() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1 w-full px-2 py-1.5 rounded text-xs text-text-primary hover:bg-bg-primary/50 transition-colors truncate"

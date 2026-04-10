@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useProjectStore } from '../../stores/projectStore'
+import ProjectEmptyState from '../layout/ProjectEmptyState'
 import { useStoryboardStore } from '../../stores/storyboardStore'
 import { useEditorStore, PHASE_LABELS, phaseIndex, type EditorPhase } from '../../stores/editorStore'
 import { usePolling } from '../../hooks/usePolling'
@@ -52,8 +53,18 @@ export default function EditorPage() {
   // Storyboard shown in ScenePanel — tracks selectedStoryboardVersion dropdown
   const [activeStoryboard, setActiveStoryboard] = useState<StoryboardOutput | null>(null)
 
+  // Track whether this is the initial mount so we don't clear the storyboard version
+  // that was pre-selected by the storyboard page (UseStoryboardButton).
+  const isFirstMountRef = useRef(true)
+
   // On project change: reset to "create new" default, load versions + storyboard data
   useEffect(() => {
+    if (!isFirstMountRef.current) {
+      // Actual project switch — discard any pre-selected storyboard version
+      setSelectedStoryboardVersion(null)
+    }
+    isFirstMountRef.current = false
+
     reset()
     setCurrentSegmentIndex(0)
     setActiveStoryboard(null)
@@ -116,11 +127,7 @@ export default function EditorPage() {
   )
 
   if (!currentProject) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted">
-        Select or create a project to get started
-      </div>
-    )
+    return <ProjectEmptyState />
   }
 
   const isViewingPast = selectedVersion !== null

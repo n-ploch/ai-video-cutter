@@ -131,9 +131,6 @@ export default function EditorVersionSidebar({
                   {formatDate(v.created_at)}
                 </span>
               </div>
-              {v.brief_snippet && (
-                <span className="mt-0.5 truncate max-w-full text-muted">{v.brief_snippet}</span>
-              )}
               {v.storyboard_version != null && (
                 <span className="mt-0.5 text-muted">sb v{v.storyboard_version}</span>
               )}

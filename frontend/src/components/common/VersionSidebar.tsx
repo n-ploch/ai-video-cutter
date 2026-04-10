@@ -150,9 +150,6 @@ export default function VersionSidebar<T extends VersionEntry>({
                   {formatDate(v.created_at)}
                 </span>
               </div>
-              {v.brief_snippet && (
-                <span className="mt-0.5 text-muted truncate max-w-full">{v.brief_snippet}</span>
-              )}
               {renderMeta?.(v)}
             </button>
           )

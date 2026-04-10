@@ -138,11 +138,6 @@ export default function StoryboardVersionSidebar({
                   {formatDate(v.created_at)}
                 </span>
               </div>
-              {v.brief_snippet && (
-                <span className="mt-0.5 truncate max-w-full text-muted">
-                  {v.brief_snippet}
-                </span>
-              )}
             </button>
           )
         })}

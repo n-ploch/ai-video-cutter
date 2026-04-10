@@ -23,7 +23,7 @@ export default function ChatInput({ onSubmit, disabled, submitted }: Props) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-          placeholder="Describe your video vision..."
+          placeholder="Describe your video vision we will use to build your video..."
           disabled={submitted}
           className="flex-1 bg-bg-surface text-text-primary text-sm px-4 py-3 rounded-xl border border-border/20 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-muted"
         />

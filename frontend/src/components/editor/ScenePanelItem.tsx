@@ -24,7 +24,7 @@ export default function ScenePanelItem({ storyboardScene, timelineScene, isRunni
         </span>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-foreground leading-snug line-clamp-2">
+          <p className="text-sm text-foreground leading-snug">
             {storyboardScene.scene_description}
           </p>
           {timelineScene && (

@@ -3,6 +3,7 @@ import AppShell from './components/layout/AppShell'
 import MediaPage from './components/media/MediaPage'
 import StoryboardPage from './components/storyboard/StoryboardPage'
 import EditorPage from './components/editor/EditorPage'
+import HelpPage from './components/help/HelpPage'
 
 export default function App() {
   return (
@@ -12,6 +13,7 @@ export default function App() {
           <Route path="/media" element={<MediaPage />} />
           <Route path="/storyboard" element={<StoryboardPage />} />
           <Route path="/editor" element={<EditorPage />} />
+          <Route path="/help" element={<HelpPage />} />
           <Route path="*" element={<Navigate to="/media" replace />} />
         </Route>
       </Routes>

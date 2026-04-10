@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useProjectStore } from '../../stores/projectStore'
+import ProjectEmptyState from '../layout/ProjectEmptyState'
 import { useStoryboardStore } from '../../stores/storyboardStore'
 import { usePolling } from '../../hooks/usePolling'
 import ChatInput from './ChatInput'
@@ -77,11 +78,7 @@ export default function StoryboardPage() {
   }
 
   if (!currentProject) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted">
-        Select or create a project to get started
-      </div>
-    )
+    return <ProjectEmptyState />
   }
 
   // What to display in the main content area
