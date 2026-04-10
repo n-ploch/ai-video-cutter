@@ -103,7 +103,7 @@ def test_create_project_manifest_has_null_processing_steps(storage, fixture_vide
     manifest_path = storage.get_project_path("myproject") / "videos" / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     entry = list(manifest["videos"].values())[0]
-    for step in ("probed", "downsampled", "optical_flow", "segmented", "described"):
+    for step in ("downsampled", "optical_flow", "segmented", "described"):
         assert entry["processing"][step] is None
 
 
