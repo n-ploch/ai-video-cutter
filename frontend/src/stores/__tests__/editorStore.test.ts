@@ -169,7 +169,7 @@ describe('editorStore', () => {
 
   it('re-trigger increments runId and clears stale taskId before API returns', async () => {
     // Simulate a slow API call — we check state before it resolves
-    let resolveFirst: (v: unknown) => void
+    let resolveFirst: (v: any) => void
     vi.mocked(editorApi.triggerEditor).mockReturnValue(
       new Promise((res) => { resolveFirst = res }),
     )
