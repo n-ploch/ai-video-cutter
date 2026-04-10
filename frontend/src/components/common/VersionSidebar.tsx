@@ -33,8 +33,6 @@ export default function VersionSidebar<T extends VersionEntry>({
 }: VersionSidebarProps<T>) {
   const [collapsed, setCollapsed] = useState(false)
 
-  // Show active entry when running, or when no versions yet (active = latest)
-  const showActiveEntry = isActiveRunning || (versions.length > 0 && !isActiveRunning)
   const showSpinnerEntry = isActiveRunning
 
   // Versions displayed newest first

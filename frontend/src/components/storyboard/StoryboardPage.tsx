@@ -21,6 +21,7 @@ export default function StoryboardPage() {
     selectedVersion,
     viewingStoryboard,
     triggerStoryboard,
+    fetchStoryboard,
     fetchVersions,
     hydrateTaskState,
     selectVersion,

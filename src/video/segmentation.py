@@ -122,7 +122,8 @@ def movement_stats(
         sig = signal_slice[:, i]
         d1 = np.gradient(sig, dt)
 
-        mono = float(spearmanr(np.arange(n), sig).statistic) if n > 2 else float("nan")
+        _r = spearmanr(np.arange(n), sig).statistic if n > 2 else 0.0
+        mono = 0.0 if (not isinstance(_r, float) or np.isnan(_r) or np.isinf(_r)) else float(_r)
 
         stats[f"{ch}_entry_vel"] = float(np.mean(d1[:win]))
         stats[f"{ch}_exit_vel"] = float(np.mean(d1[-win:]))
