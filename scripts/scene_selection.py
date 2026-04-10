@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 import json
 import logging
+import math
 import time
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
@@ -33,6 +34,17 @@ from sklearn.preprocessing import StandardScaler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+
+
+def _sanitize_json(obj):
+    """Recursively replace float NaN/inf with None to produce valid JSON."""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(v) for v in obj]
+    return obj
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +163,8 @@ def _seg_metrics(sig: np.ndarray, ts: np.ndarray) -> dict:
     d1 = np.gradient(sig, dt)
     n = len(sig)
     win = max(1, n // 10)
-    mono = float(spearmanr(np.arange(n), sig).statistic) if n > 2 else float("nan")
+    _r = spearmanr(np.arange(n), sig).statistic if n > 2 else 0.0
+    mono = 0.0 if (not isinstance(_r, float) or np.isnan(_r) or np.isinf(_r)) else float(_r)
     mad = float(np.mean(np.abs(d1)))
     return {
         "mean_abs":       float(np.mean(np.abs(sig))),
@@ -788,7 +801,7 @@ class DronePipeline:
         if output_path is None:
             output_path = str(_analysis_path(Path(video_path)))
         with open(output_path, "w") as f:
-            json.dump(result, f, indent=2)
+            json.dump(_sanitize_json(result), f, indent=2)
         log.info(f"Results saved to {output_path}")
 
         # Save embeddings + timestamp index (skip if we loaded them from disk)
@@ -1214,7 +1227,7 @@ if __name__ == "__main__":
                 Path(args.output) if args.output else _analysis_path(video_path)
             )
             with open(out_path, "w") as f:
-                json.dump(result, f, indent=2)
+                json.dump(_sanitize_json(result), f, indent=2)
             log.info(f"Saved → {out_path}")
 
             fb = result["flow_boundaries"]

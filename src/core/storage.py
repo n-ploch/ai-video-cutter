@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import math
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -101,6 +102,17 @@ def _empty_video_entry(path: Path, video_hash: str, storage_key: str | None = No
         "processing": {step: None for step in PROCESSING_STEPS},
         "config_hash": None,
     }
+
+
+def _sanitize_json(obj: Any) -> Any:
+    """Recursively replace float NaN/inf with None so json.dumps produces valid JSON."""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(v) for v in obj]
+    return obj
 
 
 # ── Storage ───────────────────────────────────────────────────────────────────
@@ -363,7 +375,7 @@ class ProjectStorage:
     @staticmethod
     def _write_json(path: Path, data: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, default=str))
+        path.write_text(json.dumps(_sanitize_json(data), indent=2, default=str))
 
     @staticmethod
     def _read_json(path: Path) -> Any:
